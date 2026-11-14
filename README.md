@@ -50,7 +50,7 @@ decisions while maintaining reliable task execution.
 ## Current Development Status
 
 - [x] Jev API connection and initial smoke test
-- [ ] Groq LLM client
+- [x] Groq LLM client
 - [ ] Tool environment
 - [ ] LLM-only baseline agent
 - [ ] LLM + Jev hybrid agent

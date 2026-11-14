@@ -1,0 +1,45 @@
+
+[
+  {
+    "id": "account_password_reset",
+    "category": "Account",
+    "title": "How to reset your account password",
+    "keywords": ["password", "reset", "forgot", "login", "account", "credentials"],
+    "content": "To reset your password, open the account login page and select Forgot Password. Enter your registered email address and follow the password reset instructions. If you do not receive the reset email, check your spam folder."
+  },
+  {
+    "id": "wifi_connection",
+    "category": "Connectivity",
+    "title": "Troubleshooting Wi-Fi connection problems",
+    "keywords": ["wifi", "wi-fi", "internet", "network", "connection", "connectivity"],
+    "content": "If you cannot connect to Wi-Fi, first verify that Wi-Fi is enabled on your device. Restart your device, reconnect to the network, and check whether other devices can access the internet. If the issue continues, contact support."
+  },
+  {
+    "id": "vpn_access",
+    "category": "Connectivity",
+    "title": "Resolving VPN access issues",
+    "keywords": ["vpn", "remote", "access", "connection", "login", "authentication"],
+    "content": "If VPN access fails, verify your account credentials and internet connection. Disconnect and reconnect the VPN client. If authentication continues to fail, contact support and include the error message."
+  },
+  {
+    "id": "email_setup",
+    "category": "Email",
+    "title": "Email access and synchronization problems",
+    "keywords": ["email", "mail", "outlook", "inbox", "synchronization", "sync"],
+    "content": "For email access problems, verify your login credentials and network connection. Check whether the issue occurs in the webmail interface as well as the desktop application. Restart the application and retry synchronization."
+  },
+  {
+    "id": "slow_system",
+    "category": "Performance",
+    "title": "Troubleshooting slow system performance",
+    "keywords": ["slow", "performance", "lag", "loading", "system", "response"],
+    "content": "If a system is responding slowly, refresh the application, close unnecessary browser tabs, and check your network connection. If the issue affects multiple users, check the service status and report the problem to support."
+  },
+  {
+    "id": "payment_failure",
+    "category": "Payments",
+    "title": "Resolving payment portal failures",
+    "keywords": ["payment", "portal", "transaction", "failure", "failed", "billing"],
+    "content": "If a payment fails, verify the transaction details and check whether the payment portal is available. Avoid repeatedly submitting the same payment while the transaction result is uncertain. Contact support with the transaction reference if the problem persists."
+  }
+]
