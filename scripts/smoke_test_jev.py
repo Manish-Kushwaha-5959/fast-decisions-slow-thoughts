@@ -13,7 +13,7 @@ state = {
     }
 }
 
-with TypeSafeClient(model="jev-latest") as client:
+with TypeSafeClient(model="jev-1.14.0") as client:
 
     response = client.system_one(
         state=state,
