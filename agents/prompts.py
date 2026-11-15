@@ -93,3 +93,117 @@ USER REQUEST:
 Choose the next action.
 Return only the required JSON object.
 """.strip()
+
+
+def build_hybrid_planning_prompt(task: str) -> str:
+    return f"""
+You are the planning component of an AI customer-support agent.
+
+Create a concise high-level plan for completing the user's request.
+
+USER REQUEST:
+{task}
+
+RULES:
+- Identify what information or actions are needed.
+- Do not execute tools or invent tool results.
+- Do not select a specific tool. A separate control system selects tools.
+- Do not assume that a task is complete before evidence is available.
+- Keep the plan practical and limited to the available customer-support context.
+
+Return exactly one JSON object:
+
+{{
+    "plan": "A concise ordered plan for completing the request"
+}}
+""".strip()
+
+
+def build_hybrid_argument_prompt(
+    task: str,
+    plan: str,
+    tool_name: str,
+    tool_description: str,
+    tool_parameters: dict,
+    history: list[dict]
+) -> str:
+    return f"""
+Generate arguments for the tool selected by the control system.
+
+USER REQUEST:
+{task}
+
+HIGH-LEVEL PLAN:
+{plan}
+
+SELECTED TOOL:
+{tool_name}
+
+TOOL DESCRIPTION:
+{tool_description}
+
+TOOL PARAMETER SCHEMA:
+{json.dumps(tool_parameters, indent=2, ensure_ascii=False)}
+
+PREVIOUS TOOL HISTORY:
+{json.dumps(history, indent=2, ensure_ascii=False)}
+
+RULES:
+- Generate arguments for the selected tool only.
+- Do not select another tool.
+- Follow the parameter schema exactly.
+- Include every required argument.
+- Do not invent information that is not available.
+- If a required value cannot reasonably be inferred from the request
+  or history, use an empty string only when the schema allows it.
+- Return arguments as a JSON object.
+
+Return exactly:
+
+{{
+    "arguments": {{
+        "parameter_name": "parameter_value"
+    }}
+}}
+""".strip()
+
+
+def build_hybrid_final_prompt(
+    task: str,
+    plan: str,
+    tool_history: list[dict],
+    termination_reason: str
+) -> str:
+    return f"""
+You are the final-response component of an AI customer-support agent.
+
+Prepare a clear and accurate response to the user's request.
+
+USER REQUEST:
+{task}
+
+HIGH-LEVEL PLAN:
+{plan}
+
+ACTUAL TOOL EXECUTION HISTORY:
+{json.dumps(tool_history, indent=2, ensure_ascii=False)}
+
+TERMINATION REASON:
+{termination_reason}
+
+RULES:
+- Use only information supported by the request and tool results.
+- Never invent a successful action or tool result.
+- Clearly distinguish successful tool executions from errors.
+- If the task could not be completed, explain what remains unresolved.
+- Do not expose internal control-system reasoning or probabilities.
+- Be concise but useful.
+- Remember that the services and support tickets in this project are simulated.
+
+Return exactly one JSON object:
+
+{{
+    "response": "The final answer to the user"
+}}
+""".strip()
+
