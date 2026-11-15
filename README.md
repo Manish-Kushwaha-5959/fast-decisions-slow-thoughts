@@ -51,11 +51,21 @@ decisions while maintaining reliable task execution.
 
 - [x] Jev API connection and initial smoke test
 - [x] Groq LLM client
-- [ ] Tool environment
-- [ ] LLM-only baseline agent
-- [ ] LLM + Jev hybrid agent
-- [ ] Uncertainty-aware escalation
-- [ ] Evaluation dashboard
+- [x] Tool environment
+- [x] LLM-only baseline agent
+- [x] LLM + Jev hybrid agent
+- [x] Uncertainty-aware escalation
+- [x] Evaluation and benchmarking framework (Phase 7)
+- [ ] Evaluation dashboard (Phase 8)
+
+### Benchmark (mocked, offline)
+
+```bash
+python scripts/run_benchmark.py --mode all --repetitions 1 --output experiments/demo_mocked
+```
+
+Live runs are opt-in and require both `--live` and `--max-live-runs N`
+plus `--yes` confirmation. See `documentations/HANDOFF.md`.
 
 ## Research Scope
 

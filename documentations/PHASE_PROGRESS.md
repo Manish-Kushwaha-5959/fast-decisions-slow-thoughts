@@ -12,16 +12,17 @@ Legend: ✅ Complete · ⚠️ Implemented but broken/unvalidated · ❌ Not sta
 | 4 | LLM-Only Baseline Agent | ✅ Complete (7/7 baseline tests pass) |
 | 5 | Hybrid LLM + Jev Agent Integration | ✅ Complete (authorization enforced; evidence-gated completion wired; 32/32 hybrid tests pass) |
 | 6 | Uncertainty Detection and Escalation | ✅ Complete (Mode C escalation implemented; 25/25 escalation tests pass) |
-| 7 | Evaluation and Benchmarking Framework | ❌ Not started (`evaluation/*.py`, `scripts/run_benchmark.py`, `data/tasks.json`, `experiments/*` all 0 bytes) |
+| 7 | Evaluation and Benchmarking Framework | ✅ Complete (67/67 Phase 7 tests pass; verifier independent of agent self-report; benchmark runs all three modes offline) |
 | 8 | Streamlit Dashboard and Final Validation | ❌ Not started (`app.py` is 0 bytes) |
 
 **Working tree state:** 4 files modified but uncommitted (`agents/control_loop.py`, `agents/hybrid_agent.py`, `agents/prompts.py`, `tests/test_hybrid_agent.py`), plus 2 stray `.bak` files. Commit `96dd81a` is "phase 5 almost complete"; the uncommitted diff is the actual Phase 5 work-in-progress.
 
-**Latest test result (2026-11-16):** 77 tests, 77 passed, 0 failed.
+**Latest test result (2026-11-16):** 144 tests, 144 passed, 0 failed.
 - `tests/test_agents.py` — 7/7 pass.
 - `tests/test_hybrid_agent.py` — 32/32 pass (Phase 5 authorization + evidence scenarios intact).
 - `tests/test_tools.py` — 13/13 pass.
 - `tests/test_escalation.py` — 25/25 pass (Phase 6 escalation scenarios added).
+- `tests/test_phase7.py` — 67/67 pass (Phase 7 verifier / metrics / logger / benchmark runner).
 
 ---
 
@@ -116,11 +117,19 @@ One controlled live Mode C run (`scripts/smoke_test_mode_c.py`, strict 2-Jev-cal
 - Jev was fully confident both times (tool confidence 1.0; completion 0.03 → 0.89), so no escalation fired — the correct Mode C behaviour for confident decisions, and consistent with the Phase 5 baseline.
 - The escalation branches themselves are verified by the 25 mocked tests and `scripts/demo_mode_c.py`; no live call was spent forcing an artificial escalation.
 
-## Phase 7 — Evaluation and Benchmarking Framework ❌
+## Phase 7 — Evaluation and Benchmarking Framework ✅
 
-- `evaluation/logger.py`, `evaluation/metrics.py`, `evaluation/task_verifier.py` all **0 bytes**.
-- `scripts/run_benchmark.py` **0 bytes**; `data/tasks.json` **0 bytes**; `experiments/results.csv` and `experiments/experiment_logs.jsonl` **0 bytes**.
-- No task verification, no metrics aggregation, no cost model, no benchmark runs. Not started.
+- **Objective:** independent outcome verification, comparable metrics, and an offline benchmark across Modes A/B/C.
+- **Implemented:**
+  - `evaluation/task_verifier.py` — `TaskVerifier` recomputes outcomes from deterministic evidence only (tool-call history, valid evidence per tool, response content rules); never trusts the agent's self-reported `success`. Outcomes: `verified` / `failed` / `unverifiable`. Also `load_tasks()` + `validate_tasks()` for the dataset.
+  - `evaluation/metrics.py` — `extract_run_metrics` (provider-distinguishable Groq/Jev tokens; missing stays `None`, never invented as zero) and `summarize_runs` (per-mode aggregation with verified vs agent-reported success rates, escalation counts/frequency).
+  - `evaluation/logger.py` — append-only `ExperimentLogger` writing CSV + JSONL; every record carries `execution_type` (`mocked`/`live`) and keeps `raw_execution` + `verification` detail. Phase 5/6 files (`results.csv`, `experiment_logs.jsonl`) are never read or rewritten.
+  - `data/tasks.json` — 10 tasks across 4 categories (knowledge_retrieval, service_status, ticket_creation, multi_step), each with `expected_tools` and a `verification` block (required/forbidden tools, response contains/excludes, evidence requirement).
+  - `scripts/run_benchmark.py` — `BenchmarkRunner` + CLI. Mocked path (default) uses deterministic fake Groq/Jev clients; live path is opt-in via `--live` + `--max-live-runs >= 1` + `--yes`, and aborts otherwise. Includes Mode C threshold analysis (`--threshold-analysis`) that reports a data gap rather than claiming calibration.
+- **Verified result: 67/67 Phase 7 tests pass** (`tests/test_phase7.py`); full suite **144/144**.
+- **Offline demo:** `python scripts/run_benchmark.py --mode all --repetitions 1 --output experiments/demo_mocked` → 30/30 runs verified (10 per mode), Mode A uses no Jev tokens, B/C distinguishable.
+- **Live safety:** `--live` without budget or confirmation exits 1 before constructing any API client; mocked mode never imports the live clients.
+- Remaining: no live benchmark run has been executed (opt-in only); escalation branches not exercised by the mocked dataset (all Jev confidences are 0.95) — calibration data gap, documented by the threshold analysis.
 
 ## Phase 8 — Streamlit Dashboard and Final Validation ❌
 

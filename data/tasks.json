@@ -1,0 +1,261 @@
+{
+  "dataset": "hybrid_agent_benchmark_v1",
+  "description": "Small representative benchmark for Modes A/B/C. Every task is answerable with the three registered local tools (search_knowledge_base, check_service_status, create_support_ticket). No external service is contacted.",
+  "tools": [
+    "search_knowledge_base",
+    "check_service_status",
+    "create_support_ticket"
+  ],
+  "tasks": [
+    {
+      "id": "kb_password_reset",
+      "description": "How do I reset my account password?",
+      "expected_outcome": "The agent retrieves the password-reset article from the knowledge base and answers with reset steps.",
+      "category": "knowledge_retrieval",
+      "difficulty": "easy",
+      "expected_tools": [
+        "search_knowledge_base"
+      ],
+      "verification": {
+        "required_tools": [
+          "search_knowledge_base"
+        ],
+        "forbidden_tools": [
+          "create_support_ticket"
+        ],
+        "response_contains": [
+          "password"
+        ],
+        "response_excludes": [
+          "ticket"
+        ],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "kb_wifi_troubleshooting",
+      "description": "My Wi-Fi keeps dropping. What troubleshooting steps should I try first?",
+      "expected_outcome": "The agent retrieves the Wi-Fi troubleshooting article and reports the steps.",
+      "category": "knowledge_retrieval",
+      "difficulty": "easy",
+      "expected_tools": [
+        "search_knowledge_base"
+      ],
+      "verification": {
+        "required_tools": [
+          "search_knowledge_base"
+        ],
+        "forbidden_tools": [
+          "create_support_ticket"
+        ],
+        "response_contains": [
+          "wi-fi"
+        ],
+        "response_excludes": [
+          "ticket"
+        ],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "kb_payment_failure",
+      "description": "Why did my payment portal transaction fail?",
+      "expected_outcome": "The agent retrieves the payment-failure article and explains the common causes.",
+      "category": "knowledge_retrieval",
+      "difficulty": "easy",
+      "expected_tools": [
+        "search_knowledge_base"
+      ],
+      "verification": {
+        "required_tools": [
+          "search_knowledge_base"
+        ],
+        "forbidden_tools": [
+          "create_support_ticket"
+        ],
+        "response_contains": [
+          "payment"
+        ],
+        "response_excludes": [
+          "ticket"
+        ],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "status_vpn",
+      "description": "Check the current VPN service status.",
+      "expected_outcome": "The agent reports the simulated VPN status as degraded with its connectivity message.",
+      "category": "service_status",
+      "difficulty": "easy",
+      "expected_tools": [
+        "check_service_status"
+      ],
+      "verification": {
+        "required_tools": [
+          "check_service_status"
+        ],
+        "forbidden_tools": [
+          "create_support_ticket"
+        ],
+        "response_contains": [
+          "vpn"
+        ],
+        "response_excludes": [
+          "ticket"
+        ],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "status_internet",
+      "description": "Is the internet service working right now?",
+      "expected_outcome": "The agent reports the simulated internet status as operational.",
+      "category": "service_status",
+      "difficulty": "easy",
+      "expected_tools": [
+        "check_service_status"
+      ],
+      "verification": {
+        "required_tools": [
+          "check_service_status"
+        ],
+        "forbidden_tools": [
+          "create_support_ticket"
+        ],
+        "response_contains": [
+          "internet"
+        ],
+        "response_excludes": [
+          "ticket"
+        ],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "status_payment_portal",
+      "description": "Check whether the payment portal is available.",
+      "expected_outcome": "The agent reports the simulated payment portal status as outage.",
+      "category": "service_status",
+      "difficulty": "easy",
+      "expected_tools": [
+        "check_service_status"
+      ],
+      "verification": {
+        "required_tools": [
+          "check_service_status"
+        ],
+        "forbidden_tools": [
+          "create_support_ticket"
+        ],
+        "response_contains": [
+          "payment"
+        ],
+        "response_excludes": [
+          "ticket"
+        ],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "ticket_login_issue",
+      "description": "Please create a support ticket for this issue: I cannot log in to my account even though my password is correct. Priority medium.",
+      "expected_outcome": "The agent creates one simulated support ticket with priority medium and returns its ticket ID.",
+      "category": "ticket_creation",
+      "difficulty": "medium",
+      "expected_tools": [
+        "create_support_ticket"
+      ],
+      "verification": {
+        "required_tools": [
+          "create_support_ticket"
+        ],
+        "forbidden_tools": [],
+        "response_contains": [
+          "ticket"
+        ],
+        "response_excludes": [],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "ticket_vpn_outage",
+      "description": "The VPN is down and I have an urgent deadline. Please create a high priority support ticket for the VPN outage.",
+      "expected_outcome": "The agent creates one simulated support ticket with priority high and returns its ticket ID.",
+      "category": "ticket_creation",
+      "difficulty": "medium",
+      "expected_tools": [
+        "create_support_ticket"
+      ],
+      "verification": {
+        "required_tools": [
+          "create_support_ticket"
+        ],
+        "forbidden_tools": [],
+        "response_contains": [
+          "ticket"
+        ],
+        "response_excludes": [],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "multi_status_and_knowledge",
+      "description": "Check whether the VPN is working, and if it is degraded or down, find the troubleshooting article for VPN access problems.",
+      "expected_outcome": "The agent checks the VPN status and also retrieves the VPN troubleshooting article from the knowledge base.",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "expected_tools": [
+        "check_service_status",
+        "search_knowledge_base"
+      ],
+      "verification": {
+        "required_tools": [
+          "check_service_status",
+          "search_knowledge_base"
+        ],
+        "forbidden_tools": [
+          "create_support_ticket"
+        ],
+        "response_contains": [
+          "vpn"
+        ],
+        "response_excludes": [],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    },
+    {
+      "id": "multi_knowledge_and_ticket",
+      "description": "Find the troubleshooting steps for slow system performance, then create a low priority support ticket about the slow performance issue.",
+      "expected_outcome": "The agent retrieves the slow-performance article and creates one low-priority simulated ticket.",
+      "category": "multi_step",
+      "difficulty": "hard",
+      "expected_tools": [
+        "search_knowledge_base",
+        "create_support_ticket"
+      ],
+      "verification": {
+        "required_tools": [
+          "search_knowledge_base",
+          "create_support_ticket"
+        ],
+        "forbidden_tools": [],
+        "response_contains": [
+          "ticket"
+        ],
+        "response_excludes": [],
+        "require_final_response": true,
+        "require_valid_evidence": true
+      }
+    }
+  ]
+}

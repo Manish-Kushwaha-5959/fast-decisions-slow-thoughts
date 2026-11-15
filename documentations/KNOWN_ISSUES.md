@@ -1,6 +1,6 @@
 # Known Issues
 
-Ordered by severity. All line numbers refer to the working tree as of 2026-11-16 (uncommitted Phase 5 state, post live validation).
+Ordered by severity. All line numbers refer to the working tree as of 2026-11-16 (Phase 7 complete, 144/144 tests pass).
 
 ## 🟢 1. Hybrid test suite is green (32/32) — contract fixed, live-validated
 
@@ -17,17 +17,17 @@ Ordered by severity. All line numbers refer to the working tree as of 2026-11-16
 - **Resolved:** `_required_tools_fulfilled` calls `_get_fulfilled_required_tools` before accepting `jev_detected_completion`; `state["fulfilled_required_tools"]` is recomputed every iteration; Jev completion without full evidence stops with `required_tools_not_fulfilled` (success stays `False`). Failed executions and malformed evidence never count.
 - **Remaining:** `consecutive_no_progress` is still initialised but never used (pre-existing, harmless).
 
-## 🟠 4. No benchmark or experiment data exists — first run recorded
+## 🟢 4. Phase 7 benchmark framework implemented and tested — resolved 2026-11-16
 
-- **Where:** `experiments/results.csv` and `experiments/experiment_logs.jsonl` now hold the single 2026-11-15 Mode B run (success, 3729 combined tokens, 5.92 s); `scripts/run_hybrid.py` appends each run to both files. `data/tasks.json` (0 bytes) and `scripts/run_benchmark.py` (0 bytes) remain empty.
-- **Impact:** The research questions (token/latency/success comparison A vs B) still cannot be answered from one run. Historical "20/20" and "35/35" claims are not reproducible.
-- **Fix:** Phase 7 — implement task verification, metrics aggregation, cost model, and a task set.
+- `evaluation/task_verifier.py`, `evaluation/metrics.py`, `evaluation/logger.py`, `data/tasks.json` (10 tasks), and `scripts/run_benchmark.py` are implemented; 67/67 Phase 7 tests pass; full suite 144/144.
+- The research questions (token/latency/success comparison A vs B vs C) are now answerable offline via the mocked benchmark; see `PHASE_PROGRESS.md`.
+- Historical "20/20" and "35/35" claims remain non-reproducible (pre-Phase-1 history); not re-litigated here.
 
-## 🟠 5. Phase 6 implemented; Phase 8 module still an empty placeholder
+## 🟠 5. Phase 7 done; Phase 8 module still an empty placeholder
 
-- `agents/escalation_agent.py` is now implemented (Mode C escalation, 25/25 tests pass).
+- `agents/escalation_agent.py` is implemented (Mode C escalation, 25/25 tests pass).
 - `app.py` (0 bytes) — no Streamlit dashboard.
-- `evaluation/logger.py`, `evaluation/metrics.py`, `evaluation/task_verifier.py` (0 bytes) — no logging/metrics/verification.
+- `evaluation/*.py` and `scripts/run_benchmark.py` are now implemented (Phase 7).
 - `tests/test_jev_client.py` (0 bytes) — no Jev client unit tests.
 
 ## 🟡 6. Loop-detection heuristic is strict and partially live-observed
@@ -62,7 +62,14 @@ Ordered by severity. All line numbers refer to the working tree as of 2026-11-16
 - `scripts/run_baseline.py` has the same pre-existing `ModuleNotFoundError: No module named 'agents'` defect that was fixed in `scripts/run_hybrid.py` (cwd not on `sys.path`); left untouched per the no-unrelated-refactor constraint of the Phase 5 live-validation task.
 - README status checklist is stale (all post-Phase-1 items unchecked despite phases 1–5 being complete).
 
-## 🟡 12. Mode C escalation thresholds are provisional, not calibrated
+## 🟡 12. `experiments/benchmark_results.*` mixes two code versions
+
+- **Where:** `experiments/benchmark_results.csv` / `.jsonl` (untracked).
+- **What:** the first 30 rows were written by the previous session's older `FakeLLMClient` constants (10/5/15 → 30 LLM tokens for Mode A) and 0.2 s latencies; rows written after the Phase 7 recovery use the current constants (20/10/30) and 0.3 s latencies. Both are mocked data, so no live cost is involved, but mixing them in one file would skew any token/latency analysis.
+- **Impact:** minor — only affects the shared default output files, not `experiments/demo_mocked/` (clean single-version run) or the Phase 5/6 files.
+- **Fix:** use `--output experiments/<name>` per run (now functional — the flag was dead code before the recovery), or clear the stale rows before the next benchmark run. Do not hand-edit history.
+
+## 🟡 13. Mode C escalation thresholds are provisional, not calibrated
 
 - **Where:** `config/settings.py` (`tool_confidence_threshold` 0.60, `completion_ambiguity_lower` 0.50, `completion_ambiguity_upper` 0.70); consumed by `agents/escalation_agent.py`.
 - **What:** The defaults follow the Phase 6 specification's provisional values, not empirical measurement. Only one live Jev data point exists (confidence 1.0; completion 0.03 → 0.75), so the band may escalate too often or too rarely in practice.
