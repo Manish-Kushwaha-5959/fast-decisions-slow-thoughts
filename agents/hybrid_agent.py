@@ -1,5 +1,6 @@
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -23,6 +24,7 @@ class HybridAgentRunResult:
 
     iterations: int = 0
     tool_calls: list[dict] = field(default_factory=list)
+    decision_history: list[dict] = field(default_factory=list)
 
     llm_input_tokens: int = 0
     llm_output_tokens: int = 0
@@ -38,6 +40,7 @@ class HybridAgentRunResult:
     total_latency_seconds: float = 0.0
 
     termination_reason: str = ""
+    task_specification: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -47,6 +50,7 @@ class HybridAgentRunResult:
             "success": self.success,
             "iterations": self.iterations,
             "tool_calls": self.tool_calls,
+            "decision_history": self.decision_history,
             "llm_input_tokens": self.llm_input_tokens,
             "llm_output_tokens": self.llm_output_tokens,
             "llm_total_tokens": self.llm_total_tokens,
@@ -65,7 +69,8 @@ class HybridAgentRunResult:
             "total_latency_seconds": round(
                 self.total_latency_seconds, 4
             ),
-            "termination_reason": self.termination_reason
+            "termination_reason": self.termination_reason,
+            "task_specification": self.task_specification
         }
 
 
@@ -127,6 +132,112 @@ class HybridAgent:
 
         return result
 
+    
+    @staticmethod
+    def _validate_task_specification(
+        specification: dict,
+        available_tools: dict[str, str],
+        task: str
+    ) -> dict:
+        """
+        Validate the planner's task specification before execution.
+        """
+
+        if not isinstance(specification, dict):
+            raise ValueError(
+                "Task specification must be a JSON object."
+            )
+
+        required_fields = {
+            "objective",
+            "required_outcomes",
+            "allowed_tools",
+            "completion_criteria"
+        }
+
+        if set(specification.keys()) != required_fields:
+            raise ValueError(
+                "Task specification must contain exactly: "
+                f"{sorted(required_fields)}"
+            )
+
+        objective = specification["objective"]
+        outcomes = specification["required_outcomes"]
+        allowed_tools = specification["allowed_tools"]
+        criteria = specification["completion_criteria"]
+
+        if not isinstance(objective, str) or not objective.strip():
+            raise ValueError("Task objective must be a non-empty string.")
+
+        if (
+            not isinstance(outcomes, list)
+            or not outcomes
+            or not all(
+                isinstance(item, str) and item.strip()
+                for item in outcomes
+            )
+        ):
+            raise ValueError(
+                "required_outcomes must be a non-empty list of strings."
+            )
+
+        if (
+            not isinstance(allowed_tools, list)
+            or not all(
+                isinstance(item, str) and item in available_tools
+                for item in allowed_tools
+            )
+        ):
+            raise ValueError(
+                "allowed_tools contains an invalid or unregistered tool."
+            )
+
+        if len(allowed_tools) != len(set(allowed_tools)):
+            raise ValueError("allowed_tools must not contain duplicates.")
+
+        if (
+            not isinstance(criteria, list)
+            or not criteria
+            or not all(
+                isinstance(item, str) and item.strip()
+                for item in criteria
+            )
+        ):
+            raise ValueError(
+                "completion_criteria must be a non-empty list of strings."
+            )
+
+        # Creating a support ticket is a state-changing action.
+        # Require explicit user authorisation independently of
+        # the planner's interpretation.
+        if "create_support_ticket" in allowed_tools:
+            explicit_ticket_request = re.search(
+                r"\b(create|open|raise|file|submit|log)\b"
+                r".{0,50}\b(ticket|support ticket)\b"
+                r"|\b(ticket|support ticket)\b"
+                r".{0,50}\b(create|open|raise|file|submit|log)\b",
+                task,
+                flags=re.IGNORECASE
+            )
+
+            if not explicit_ticket_request:
+                raise ValueError(
+                    "Support-ticket creation was not explicitly "
+                    "requested by the user."
+                )
+
+        return {
+            "objective": objective.strip(),
+            "required_outcomes": [
+                item.strip() for item in outcomes
+            ],
+            "allowed_tools": allowed_tools.copy(),
+            "completion_criteria": [
+                item.strip() for item in criteria
+            ]
+        }
+
+
     def run(self, task: str) -> HybridAgentRunResult:
         if not isinstance(task, str) or not task.strip():
             raise ValueError("Task must be a non-empty string.")
@@ -137,20 +248,26 @@ class HybridAgent:
         result = HybridAgentRunResult(task=task)
         run_start = time.perf_counter()
 
-        # Phase 1: Groq creates the high-level plan.
+        # Phase 1: Groq creates the plan and task specification.
+        available_tools = self.registry.get_tool_descriptions()
+
         try:
             planning_response = self.llm.generate(
                 messages=[
                     {
                         "role": "system",
                         "content": (
-                            "You are the planning component of a "
-                            "hybrid customer-support agent."
+                            "You are the task-planning component of a "
+                            "hybrid customer-support agent. "
+                            "Return a valid structured task specification."
                         )
                     },
                     {
                         "role": "user",
-                        "content": build_hybrid_planning_prompt(task)
+                        "content": build_hybrid_planning_prompt(
+                            task=task,
+                            available_tools=available_tools
+                        )
                     }
                 ],
                 response_format={"type": "json_object"}
@@ -159,18 +276,31 @@ class HybridAgent:
             result.llm_input_tokens += planning_response.input_tokens
             result.llm_output_tokens += planning_response.output_tokens
             result.llm_total_tokens += planning_response.total_tokens
-            result.llm_latency_seconds += planning_response.latency_seconds
+            result.llm_latency_seconds += (
+                planning_response.latency_seconds
+            )
 
             planning_data = self._parse_json(
                 planning_response.content
             )
 
             plan = planning_data.get("plan")
+            specification = planning_data.get("task_specification")
 
             if not isinstance(plan, str) or not plan.strip():
-                raise ValueError("LLM did not provide a usable plan.")
+                raise ValueError(
+                    "LLM did not provide a usable plan."
+                )
 
             result.plan = plan.strip()
+
+            result.task_specification = (
+                self._validate_task_specification(
+                    specification=specification,
+                    available_tools=available_tools,
+                    task=task
+                )
+            )
 
         except Exception as exc:
             result.termination_reason = "planning_error"
@@ -182,14 +312,17 @@ class HybridAgent:
             )
             return result
 
+
         # Phase 2: Jev-controlled execution loop.
         loop_result = self.control_loop.run(
             task=task,
-            plan=result.plan
+            plan=result.plan,
+            task_specification=result.task_specification
         )
 
         result.iterations = loop_result.iterations
         result.tool_calls = loop_result.tool_calls
+        result.decision_history = loop_result.decision_history
         result.termination_reason = loop_result.termination_reason
 
         result.llm_input_tokens += loop_result.llm_input_tokens

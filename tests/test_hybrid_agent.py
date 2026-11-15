@@ -297,13 +297,16 @@ def test_hybrid_stops_when_jev_detects_loop():
     agent, llm, jev = make_agent(
         llm_responses=[
             plan_response(),
-            arguments_response(),
+            arguments_response("VPN"),
+            arguments_response("Email"),
             final_response()
         ],
         jev_decisions=[
             make_jev_decision(),
+            make_jev_decision(),
             make_jev_decision(
-                loop_probability=0.95
+                loop_probability=0.95,
+                progress_score=0.5
             )
         ]
     )
@@ -315,9 +318,43 @@ def test_hybrid_stops_when_jev_detects_loop():
     assert result.success is False
     assert result.termination_reason == "jev_detected_loop"
 
-    # The first tool call happened, but the loop prevented another.
-    assert len(result.tool_calls) == 1
+    # Loop termination requires at least two completed tool calls
+    # and negligible progress.
+    assert len(result.tool_calls) == 2
 
+
+def test_hybrid_does_not_stop_for_loop_score_after_one_successful_tool():
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(),
+            arguments_response("VPN"),
+            arguments_response("Email"),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(),
+            make_jev_decision(
+                loop_probability=0.83,
+                completion_probability=0.41,
+                progress_score=1.87
+            ),
+            make_jev_decision(
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is True
+    assert result.termination_reason == "jev_detected_completion"
+    assert len(result.tool_calls) == 2
+
+    # A high loop score after only one action must not terminate.
+    assert result.decision_history[1]["loop_probability"] == 0.83
 
 def test_hybrid_rejects_unregistered_jev_tool():
     agent, llm, jev = make_agent(

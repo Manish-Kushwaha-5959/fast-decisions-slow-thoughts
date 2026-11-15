@@ -10,3 +10,5 @@ export_project.py
 PROJECT_CONTEXT.txt
 export_selected_files.py
 SELECTED_CODE_CONTEXT.txt
+
+.claude/

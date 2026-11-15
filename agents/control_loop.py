@@ -18,6 +18,7 @@ class ControlLoopResult:
     final_response: str = ""
     iterations: int = 0
     tool_calls: list[dict] = field(default_factory=list)
+    decision_history: list[dict] = field(default_factory=list)
 
     jev_input_tokens: int = 0
     jev_output_tokens: int = 0
@@ -115,6 +116,79 @@ class ControlLoop:
             ensure_ascii=False
         )
 
+    
+    @staticmethod
+    def _has_valid_evidence(
+        tool_name: str,
+        execution_status: str,
+        tool_result: dict
+    ) -> bool:
+        """
+        Check whether a successful tool execution produced useful,
+        structurally valid evidence.
+        """
+
+        if execution_status != "success":
+            return False
+
+        if not isinstance(tool_result, dict):
+            return False
+
+        if "error" in tool_result:
+            return False
+
+        if tool_name == "check_service_status":
+            return (
+                isinstance(tool_result.get("service"), str)
+                and bool(tool_result["service"].strip())
+                and tool_result.get("status")
+                in {"operational", "degraded", "outage"}
+                and tool_result.get("source") == "local_simulation"
+            )
+
+        if tool_name == "search_knowledge_base":
+            results = tool_result.get("results")
+
+            return (
+                isinstance(results, list)
+                and len(results) > 0
+                and tool_result.get("result_count", 0) > 0
+            )
+
+        if tool_name == "create_support_ticket":
+            return (
+                isinstance(tool_result.get("ticket_id"), str)
+                and bool(tool_result["ticket_id"])
+                and tool_result.get("status") == "created"
+                and tool_result.get("simulation") is True
+            )
+
+        # Generic fallback for future registered tools.
+        return bool(tool_result)
+
+    @staticmethod
+    def _get_fulfilled_required_tools(
+        required_tools: list[str],
+        tool_history: list[dict]
+    ) -> list[str]:
+        """Return required tools that have produced valid evidence."""
+
+        fulfilled = set()
+
+        for call in tool_history:
+            if ControlLoop._has_valid_evidence(
+                call["tool_name"],
+                call["execution_status"],
+                call["result"]
+            ):
+                fulfilled.add(call["tool_name"])
+
+        return [
+            tool for tool in required_tools
+            if tool in fulfilled
+        ]
+
+
     def _record_jev_usage(self, result, decision):
         result.jev_input_tokens += decision.input_tokens
         result.jev_output_tokens += decision.output_tokens
@@ -127,12 +201,44 @@ class ControlLoop:
         result.llm_total_tokens += response.total_tokens
         result.llm_latency_seconds += response.latency_seconds
 
-    def run(self, task: str, plan: str) -> ControlLoopResult:
+    def run(
+    self,
+    task: str,
+    plan: str,
+    task_specification: dict | None = None
+    ) -> ControlLoopResult:
         result = ControlLoopResult()
+
+        # Backward-compatible fallback for existing direct callers.
+        if task_specification is None:
+            available_tools = self.registry.get_tool_descriptions()
+            required_tools = list(available_tools.keys())
+        else:
+            all_tools = self.registry.get_tool_descriptions()
+
+            allowed_tools = task_specification["allowed_tools"]
+            required_tools = task_specification["required_tools"]
+
+            available_tools = {
+                name: all_tools[name]
+                for name in allowed_tools
+            }
+
+        # Jev requires at least one available tool.
+        # A task with no required or authorised tool execution
+        # can be completed without entering the decision loop.
+        if not available_tools:
+            result.success = True
+            result.termination_reason = "no_tool_execution_required"
+            return result
 
         state = {
             "user_request": task,
             "high_level_plan": plan,
+            "task_specification": task_specification or {},
+            "required_tools": required_tools,
+            "allowed_tools": list(available_tools.keys()),
+            "fulfilled_required_tools": [],
             "iteration": 0,
             "tool_history": [],
             "latest_tool_result": None,
@@ -140,6 +246,7 @@ class ControlLoop:
         }
 
         call_counts = {}
+        consecutive_no_progress = 0
 
         available_tools = self.registry.get_tool_descriptions()
 
@@ -170,6 +277,22 @@ class ControlLoop:
                 decision.loop_probability
             )
 
+            # Preserve every Jev decision, including decisions that
+            # terminate execution before another tool call.
+            result.decision_history.append({
+                "iteration": iteration + 1,
+                "selected_tool": decision.selected_tool,
+                "tool_probabilities": decision.tool_probabilities,
+                "tool_confidence": decision.tool_confidence,
+                "completion_probability": completion_probability,
+                "loop_probability": loop_probability,
+                "progress_score": decision.progress_score,
+                "model": decision.model,
+                "input_tokens": decision.input_tokens,
+                "output_tokens": decision.output_tokens,
+                "latency_seconds": decision.latency_seconds
+            })
+
             state["progress_history"].append({
                 "iteration": iteration + 1,
                 "progress_score": decision.progress_score,
@@ -183,12 +306,26 @@ class ControlLoop:
                 result.termination_reason = "jev_detected_completion"
                 break
 
-            if loop_probability >= self.loop_threshold:
+            # A high model-predicted loop probability alone is not
+            # sufficient evidence of a loop. Require multiple completed
+            # tool calls and negligible progress before terminating.
+            has_repeated_action_history = len(result.tool_calls) >= 2
+            has_negligible_progress = (
+                self._normalise_probability(
+                    decision.progress_score / 5.0
+                ) <= 0.20
+            )
+
+            if (
+                loop_probability >= self.loop_threshold
+                and has_repeated_action_history
+                and has_negligible_progress
+            ):
                 result.termination_reason = "jev_detected_loop"
                 result.final_response = (
                     "The agent stopped because the control system "
-                    "detected a repeated action pattern without "
-                    "sufficient progress."
+                    "detected a likely repeated action pattern "
+                    "with negligible progress."
                 )
                 break
 
