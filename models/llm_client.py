@@ -65,6 +65,10 @@ class GroqLLMClient:
                 if max_completion_tokens is not None
                 else self.max_completion_tokens
             ),
+
+            # GPT-OSS reasoning configuration
+            "reasoning_effort": "low",
+            "include_reasoning": False,
         }
 
         if response_format is not None:

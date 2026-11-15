@@ -4,3 +4,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# remove context extracting script and it result
+export_project.py
+PROJECT_CONTEXT.txt
+export_selected_files.py
+SELECTED_CODE_CONTEXT.txt
