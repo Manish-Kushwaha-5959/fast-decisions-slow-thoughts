@@ -152,6 +152,7 @@ class HybridAgent:
             "objective",
             "required_outcomes",
             "allowed_tools",
+            "required_tools",
             "completion_criteria"
         }
 
@@ -164,6 +165,7 @@ class HybridAgent:
         objective = specification["objective"]
         outcomes = specification["required_outcomes"]
         allowed_tools = specification["allowed_tools"]
+        required_tools = specification["required_tools"]
         criteria = specification["completion_criteria"]
 
         if not isinstance(objective, str) or not objective.strip():
@@ -194,6 +196,25 @@ class HybridAgent:
 
         if len(allowed_tools) != len(set(allowed_tools)):
             raise ValueError("allowed_tools must not contain duplicates.")
+
+        if (
+            not isinstance(required_tools, list)
+            or not all(
+                isinstance(item, str) and item.strip()
+                for item in required_tools
+            )
+        ):
+            raise ValueError(
+                "required_tools must be a list of strings."
+            )
+
+        # Every required tool must be among the allowed tools.
+        for tool in required_tools:
+            if tool not in allowed_tools:
+                raise ValueError(
+                    "Required tool is not in allowed_tools: "
+                    f"{tool}"
+                )
 
         if (
             not isinstance(criteria, list)
@@ -232,6 +253,7 @@ class HybridAgent:
                 item.strip() for item in outcomes
             ],
             "allowed_tools": allowed_tools.copy(),
+            "required_tools": [item.strip() for item in required_tools],
             "completion_criteria": [
                 item.strip() for item in criteria
             ]

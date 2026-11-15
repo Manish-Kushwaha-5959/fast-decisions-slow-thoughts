@@ -57,8 +57,9 @@ Groq decides: plan, tool, arguments, continuation, completion. Errors: `invalid_
 **`HybridAgent.run(task)`** orchestrates three phases:
 
 ### Phase 1 — Planning (Groq)
-- `build_hybrid_planning_prompt(task, available_tools)` returns a JSON object with `plan` and `task_specification`.
-- `_validate_task_specification()` enforces exact fields `{objective, required_outcomes, allowed_tools, completion_criteria}`, valid types, `allowed_tools ⊆ registered tools`, no duplicates, and **explicit user authorization regex** for `create_support_ticket`.
+- `build_hybrid_planning_prompt(task, available_tools)` returns a JSON object with `plan` and a five-field `task_specification`: `objective`, `required_outcomes`, `allowed_tools`, `required_tools`, `completion_criteria`.
+- `_validate_task_specification()` enforces exact five fields, valid types, `required_tools ⊆ allowed_tools`, `allowed_tools ⊆ registered tools`, no duplicates in `allowed_tools`, and **explicit user authorization regex** for `create_support_ticket`.
+- `required_tools` may be empty (no mandatory tool); `allowed_tools` must be non-empty.
 - Failure → `termination_reason = "planning_error"`, no Jev call.
 
 ### Phase 2 — Control Loop (`ControlLoop.run`)

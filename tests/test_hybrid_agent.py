@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from types import SimpleNamespace
@@ -96,8 +98,49 @@ class FakeJevClient:
 # Shared helpers
 # ---------------------------------------------------------
 
-def plan_response():
-    return '{"plan": "Check the requested service status."}'
+def plan_response(
+    plan="Check the requested service status.",
+    allowed_tools=None,
+    required_tools=None,
+    objective="Check the current VPN service status.",
+    required_outcomes=None,
+    completion_criteria=None
+):
+    """
+    Build a valid planning response matching the current
+    HybridAgent planning contract.
+
+    The planner must return a plan plus a structured
+    task_specification with exactly five fields:
+    objective, required_outcomes, allowed_tools,
+    required_tools and completion_criteria.
+    """
+    if allowed_tools is None:
+        allowed_tools = ["check_service_status"]
+
+    if required_tools is None:
+        required_tools = []
+
+    if required_outcomes is None:
+        required_outcomes = [
+            "The status of the requested service has been determined."
+        ]
+
+    if completion_criteria is None:
+        completion_criteria = [
+            "A service status result has been retrieved."
+        ]
+
+    return json.dumps({
+        "plan": plan,
+        "task_specification": {
+            "objective": objective,
+            "required_outcomes": required_outcomes,
+            "allowed_tools": allowed_tools,
+            "required_tools": required_tools,
+            "completion_criteria": completion_criteria
+        }
+    })
 
 
 def arguments_response(service="VPN"):
@@ -182,6 +225,147 @@ def test_hybrid_handles_invalid_planning_json():
 
     # Planning failed, so Jev must not be called.
     assert len(jev.calls) == 0
+
+
+def test_hybrid_rejects_incomplete_task_specification():
+    # Valid JSON, but the required task_specification is missing.
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            '{"plan": "Check the requested service status."}'
+        ]
+    )
+
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is False
+    assert result.termination_reason == "planning_error"
+    assert "planning stage" in result.final_response.lower()
+
+    # An incomplete specification must not reach Jev.
+    assert len(jev.calls) == 0
+
+
+def test_hybrid_accepts_valid_five_field_specification():
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                required_tools=["check_service_status"]
+            ),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                completion_probability=0.95
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is True
+
+    # The validated specification preserves required_tools.
+    assert result.task_specification["required_tools"] == [
+        "check_service_status"
+    ]
+
+    assert result.task_specification["allowed_tools"] == [
+        "check_service_status"
+    ]
+
+    # Planning succeeded; Jev evaluated completion immediately.
+    assert len(jev.calls) == 1
+    assert len(llm.calls) == 2
+
+
+def test_hybrid_rejects_missing_required_field():
+    from agents.hybrid_agent import HybridAgent
+
+    try:
+        HybridAgent._validate_task_specification(
+            specification={
+                "objective": "Check the current VPN service status.",
+                "required_outcomes": ["A service status result."],
+                "allowed_tools": ["check_service_status"],
+                "completion_criteria": ["A status result."]
+            },
+            available_tools=build_default_registry().get_tool_descriptions(),
+            task="Check the current VPN service status."
+        )
+        assert False, "Expected ValueError for missing required_tools."
+
+    except ValueError as exc:
+        assert "required_tools" in str(exc)
+
+
+def test_hybrid_rejects_unexpected_field():
+    from agents.hybrid_agent import HybridAgent
+
+    try:
+        HybridAgent._validate_task_specification(
+            specification={
+                "objective": "Check the current VPN service status.",
+                "required_outcomes": ["A service status result."],
+                "allowed_tools": ["check_service_status"],
+                "required_tools": [],
+                "completion_criteria": ["A status result."],
+                "extra_field": "unexpected"
+            },
+            available_tools=build_default_registry().get_tool_descriptions(),
+            task="Check the current VPN service status."
+        )
+        assert False, "Expected ValueError for unexpected field."
+
+    except ValueError as exc:
+        assert "must contain exactly" in str(exc)
+
+
+def test_hybrid_accepts_empty_required_tools():
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(required_tools=[]),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                completion_probability=0.95
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is True
+    assert result.task_specification["required_tools"] == []
+
+
+def test_hybrid_rejects_required_tool_not_in_allowed_tools():
+    from agents.hybrid_agent import HybridAgent
+
+    try:
+        HybridAgent._validate_task_specification(
+            specification={
+                "objective": "Check the current VPN service status.",
+                "required_outcomes": ["A service status result."],
+                "allowed_tools": ["check_service_status"],
+                "required_tools": ["create_support_ticket"],
+                "completion_criteria": ["A status result."]
+            },
+            available_tools=build_default_registry().get_tool_descriptions(),
+            task="Check the current VPN service status."
+        )
+        assert False, (
+            "Expected ValueError for required tool outside allowed_tools."
+        )
+
+    except ValueError as exc:
+        assert "not in allowed_tools" in str(exc)
 
 
 def test_hybrid_rejects_empty_task():

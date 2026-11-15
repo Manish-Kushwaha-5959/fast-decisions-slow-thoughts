@@ -3,17 +3,17 @@
 ## Current development state
 
 - **Phases 1–4 complete and verified** (live-API validated for phases 1–2; unit-tested for phases 3–4).
-- **Phase 5 implemented but not validated:** the uncommitted refactor adds a structured `task_specification` and Jev-controlled control loop, but **13 of 14 hybrid tests fail** (all die at `planning_error` because the mocks lack a `task_specification`).
+- **Phase 5 implemented and unit-tested:** the five-field `task_specification` contract is now consistent across `prompts.py`, `hybrid_agent.py`, and `control_loop.py`; **21/21 hybrid tests pass** (41/41 total). Two known bugs remain deliberately unfixed: the allowed-tools filter overwrite at `control_loop.py:251`, and the dead `_get_fulfilled_required_tools` evidence gate.
 - **Phases 6–8 not started** (`escalation_agent.py`, `evaluation/*.py`, `scripts/run_benchmark.py`, `data/tasks.json`, `experiments/*`, `app.py` are all 0 bytes).
 - Working tree is uncommitted: `control_loop.py`, `hybrid_agent.py`, `prompts.py`, `test_hybrid_agent.py` modified; `control_loop.py.bak`, `hybrid_agent.py.bak` are stray backups.
 
 ## Verified test results (2026-11-15)
 
 ```
-35 tests: 22 passed, 13 failed
-  tests/test_agents.py     7/7   PASSED
-  tests/test_tools.py     13/13  PASSED
-  tests/test_hybrid_agent.py  1/15  PASSED  ← 13 failing
+41 tests: 41 passed, 0 failed
+  tests/test_agents.py       7/7   PASSED
+  tests/test_hybrid_agent.py 21/21 PASSED  ← five-field contract + original scenarios
+  tests/test_tools.py        13/13 PASSED
 ```
 
 All tests are **mocked** (`FakeLLMClient`, `FakeJevClient`); no test touches a live API. The only live validations are the hand-run scripts in `documentations/03` and `documentations/05`.
@@ -28,11 +28,10 @@ All tests are **mocked** (`FakeLLMClient`, `FakeJevClient`); no test touches a l
 
 ## Immediate next development priorities
 
-1. **Fix the hybrid test mocks** (`tests/test_hybrid_agent.py`): add a valid `task_specification` to `plan_response()` and the other mock payloads. This is the fastest path to a green suite and lets you trust the rest of Phase 5.
-2. **Fix `control_loop.py:251`** — the allowed-tools filter is overwritten by the full registry. This is a real authorisation bug, not just a test artifact.
-3. **Wire or remove `_get_fulfilled_required_tools`** — currently dead code that was meant to gate completion on evidence.
-4. **Run one live end-to-end Mode B task** (`python scripts/run_hybrid.py --task "..."`) and record the result in `experiments/`.
-5. **Implement Phase 7** (task verification, metrics, benchmark) before Phase 6, since escalation needs a working evaluation baseline.
+1. **Fix `control_loop.py:251`** — the allowed-tools filter is overwritten by the full registry. This is a real authorisation bug, not just a test artifact.
+2. **Wire or remove `_get_fulfilled_required_tools`** — currently dead code that was meant to gate completion on evidence.
+3. **Run one live end-to-end Mode B task** (`python scripts/run_hybrid.py --task "..."`) and record the result in `experiments/`.
+4. **Implement Phase 7** (task verification, metrics, benchmark) before Phase 6, since escalation needs a working evaluation baseline.
 
 ## Exact files to inspect before continuing
 

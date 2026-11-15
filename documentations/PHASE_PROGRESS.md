@@ -10,12 +10,17 @@ Legend: ✅ Complete · ⚠️ Implemented but broken/unvalidated · ❌ Not sta
 | 2 | Jev Integration | ✅ Complete (live-API validated; no unit tests) |
 | 3 | Tool Development and Registry | ✅ Complete (13/13 tool tests pass) |
 | 4 | LLM-Only Baseline Agent | ✅ Complete (7/7 baseline tests pass) |
-| 5 | Hybrid LLM + Jev Agent Integration | ⚠️ Implemented, **13/14 hybrid tests fail** |
+| 5 | Hybrid LLM + Jev Agent Integration | ⚠️ Implemented, tests green (21/21); allowed-tools filter bug and evidence-completion gate remain unfixed |
 | 6 | Uncertainty Detection and Escalation | ❌ Not started (`agents/escalation_agent.py` is 0 bytes) |
 | 7 | Evaluation and Benchmarking Framework | ❌ Not started (`evaluation/*.py`, `scripts/run_benchmark.py`, `data/tasks.json`, `experiments/*` all 0 bytes) |
 | 8 | Streamlit Dashboard and Final Validation | ❌ Not started (`app.py` is 0 bytes) |
 
 **Working tree state:** 4 files modified but uncommitted (`agents/control_loop.py`, `agents/hybrid_agent.py`, `agents/prompts.py`, `tests/test_hybrid_agent.py`), plus 2 stray `.bak` files. Commit `96dd81a` is "phase 5 almost complete"; the uncommitted diff is the actual Phase 5 work-in-progress.
+
+**Latest test result (2026-11-15):** 41 tests, 41 passed, 0 failed.
+- `tests/test_agents.py` — 7/7 pass.
+- `tests/test_hybrid_agent.py` — 21/21 pass.
+- `tests/test_tools.py` — 13/13 pass.
 
 ---
 
@@ -57,21 +62,20 @@ Legend: ✅ Complete · ⚠️ Implemented but broken/unvalidated · ❌ Not sta
 - Validation: `tests/test_agents.py` **7/7 pass** (final response, tool-then-final, tool error handling, iteration limit, invalid JSON, empty task, invalid limit). All mocked (`FakeLLMClient`) — no network.
 - Remaining: none.
 
-## Phase 5 — Hybrid LLM + Jev Agent Integration ⚠️ BROKEN
+## Phase 5 — Hybrid LLM + Jev Agent Integration ⚠️ Tests green; two known bugs remain
 
 **Objective:** Groq plans + generates arguments + final response; Jev selects tools, detects completion/loops, estimates progress.
 
 - Implemented (uncommitted, on top of `96dd81a`):
-  - `agents/hybrid_agent.py`: `HybridAgent`, `HybridAgentRunResult` (now includes `decision_history`, `task_specification`), 3-phase `run()`, `_validate_task_specification()` (exact field set, type checks, `allowed_tools ⊆ registry`, duplicate check, **explicit-user-authorization regex for `create_support_ticket`**).
+  - `agents/hybrid_agent.py`: `HybridAgent`, `HybridAgentRunResult` (includes `decision_history`, `task_specification`), 3-phase `run()`, `_validate_task_specification()` (exact five-field set, type checks, `required_tools ⊆ allowed_tools`, `allowed_tools ⊆ registry`, duplicate check, **explicit-user-authorization regex for `create_support_ticket`**).
   - `agents/control_loop.py`: `ControlLoop`, `ControlLoopResult`; Jev-controlled loop with completion threshold 0.70, loop threshold 0.70 + ≥2 tool calls + progress ≤ 0.20, `max_identical_calls=2` signature guard, `decision_history` recording, `_has_valid_evidence`, `_get_fulfilled_required_tools`.
-  - `agents/prompts.py`: `build_hybrid_planning_prompt(task, available_tools)` now returns `plan` + `task_specification`; `build_hybrid_argument_prompt`; `build_hybrid_final_prompt`.
-- **Verified result: 13 of 14 hybrid tests FAIL** (`tests/test_hybrid_agent.py`). Root cause: mocks still return the old plan-only JSON (`{"plan": ...}`), while the code now requires a full `task_specification` → every run dies at `planning_error` before Jev is called. See KNOWN_ISSUES.md #1.
-- Also unvalidated in live runs: no `scripts/run_hybrid.py` execution result is recorded anywhere; `experiments/` is empty.
+  - `agents/prompts.py`: `build_hybrid_planning_prompt(task, available_tools)` returns `plan` + five-field `task_specification`; `build_hybrid_argument_prompt`; `build_hybrid_final_prompt`.
+- **Verified result: 21/21 hybrid tests pass** (`tests/test_hybrid_agent.py`). Full suite: **41/41 pass**.
+- **Task specification contract (five fields):** `objective` (non-empty string), `required_outcomes` (non-empty list of strings), `allowed_tools` (non-empty list of registered tool names, no duplicates), `required_tools` (list of strings, each must be in `allowed_tools`, may be empty), `completion_criteria` (non-empty list of strings).
 - Remaining before this phase can be called complete:
-  1. Update test mocks to emit valid `task_specification` payloads.
-  2. Fix `control_loop.py:251` (allowed-tools filter overwritten by full registry).
-  3. Wire `_get_fulfilled_required_tools` into the completion decision or remove it.
-  4. At least one live end-to-end Mode B run with recorded metrics.
+  1. Fix `control_loop.py:251` (allowed-tools filter overwritten by full registry) — known safety bug, deliberately deferred.
+  2. Wire `_get_fulfilled_required_tools` into the completion decision or remove it (currently dead code).
+  3. At least one live end-to-end Mode B run with recorded metrics.
 
 ## Phase 6 — Uncertainty Detection and Escalation ❌
 

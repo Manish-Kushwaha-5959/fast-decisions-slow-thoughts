@@ -202,6 +202,9 @@ Return exactly one valid JSON object:
         "allowed_tools": [
             "exact_registered_tool_name"
         ],
+        "required_tools": [
+            "exact_registered_tool_name"
+        ],
         "completion_criteria": [
             "An observable condition demonstrating completion."
         ]

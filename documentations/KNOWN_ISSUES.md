@@ -2,12 +2,10 @@
 
 Ordered by severity. All line numbers refer to the working tree as of 2026-11-15 (uncommitted Phase 5 state).
 
-## 🔴 1. Hybrid test suite is red (13/14 failing)
+## 🟢 1. Hybrid test suite is green (21/21) — contract fixed
 
-- **Where:** `tests/test_hybrid_agent.py`, `plan_response()` helper (line ~100).
-- **What:** Every hybrid test mock returns `{"plan": "..."}` without a `task_specification` key. The uncommitted refactor in `agents/hybrid_agent.py` now requires a full task specification (`objective`, `required_outcomes`, `allowed_tools`, `completion_criteria`), so `_validate_task_specification()` raises `ValueError("Task specification must be a JSON object.")` → every run terminates with `planning_error` before Jev is ever called.
-- **Impact:** Phase 5 cannot be considered validated. The baseline (7/7) and tool (13/13) suites still pass.
-- **Fix:** extend the mock payloads to include a valid `task_specification` block; re-run `pytest tests/test_hybrid_agent.py`.
+- **Resolved:** The five-field `task_specification` contract is now consistent across `prompts.py`, `hybrid_agent.py`, and `control_loop.py`. Mocks emit valid specs; 21/21 hybrid tests pass (41/41 total).
+- **Remaining risk:** the contract is only enforced by unit tests with mocks; no live planner run has yet produced a real five-field spec.
 
 ## 🔴 2. `allowed_tools` restriction is silently discarded
 
