@@ -23,8 +23,8 @@ hybrid_agent_mvp/
 │   ├── metrics.py              *** 0 bytes ***
 │   └── task_verifier.py        *** 0 bytes ***
 ├── experiments/
-│   ├── results.csv             *** 0 bytes ***
-│   └── experiment_logs.jsonl   *** 0 bytes ***
+│   ├── results.csv             first live Mode B run recorded 2026-11-15
+│   └── experiment_logs.jsonl   first live Mode B run recorded 2026-11-15
 ├── models/
 │   ├── llm_client.py           GroqLLMClient
 │   └── jev_client.py           JevClient (TypeSafe SDK)
@@ -37,7 +37,7 @@ hybrid_agent_mvp/
 │   └── test_jev_client.py      live Jev client test
 ├── tests/
 │   ├── test_agents.py          7 baseline tests (mocked)
-│   ├── test_hybrid_agent.py    15 hybrid tests (mocked)
+│   ├── test_hybrid_agent.py    32 hybrid tests (mocked)
 │   ├── test_tools.py           13 tool/registry tests
 │   └── test_jev_client.py      *** 0 bytes ***
 ├── app.py                      *** 0 bytes — Phase 8 dashboard placeholder ***

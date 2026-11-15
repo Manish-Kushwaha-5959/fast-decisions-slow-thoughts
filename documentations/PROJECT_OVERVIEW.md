@@ -57,4 +57,4 @@ See `requirements.txt`:
 - The knowledge base is a static JSON file (`data/knowledge_base.json`) with lexical token-overlap retrieval, not semantic search.
 - Service statuses are a fixed dictionary (`tools/service_status.py`).
 - Support tickets are in-memory only; ticket IDs are sequential and reset between runs.
-- `experiments/results.csv` and `experiments/experiment_logs.jsonl` exist but are **empty (0 bytes)** — no benchmark experiment has been run yet.
+- `experiments/results.csv` and `experiments/experiment_logs.jsonl` hold the first recorded live Mode B run (2026-11-15, success, 3729 combined tokens, 5.92 s); `scripts/run_hybrid.py` appends every run to both files. No benchmark campaign has been run yet.

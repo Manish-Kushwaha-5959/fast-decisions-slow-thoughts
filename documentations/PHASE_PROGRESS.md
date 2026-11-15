@@ -10,16 +10,16 @@ Legend: ✅ Complete · ⚠️ Implemented but broken/unvalidated · ❌ Not sta
 | 2 | Jev Integration | ✅ Complete (live-API validated; no unit tests) |
 | 3 | Tool Development and Registry | ✅ Complete (13/13 tool tests pass) |
 | 4 | LLM-Only Baseline Agent | ✅ Complete (7/7 baseline tests pass) |
-| 5 | Hybrid LLM + Jev Agent Integration | ⚠️ Implemented, tests green (21/21); allowed-tools filter bug and evidence-completion gate remain unfixed |
+| 5 | Hybrid LLM + Jev Agent Integration | ✅ Complete (authorization enforced; evidence-gated completion wired; 32/32 hybrid tests pass) |
 | 6 | Uncertainty Detection and Escalation | ❌ Not started (`agents/escalation_agent.py` is 0 bytes) |
 | 7 | Evaluation and Benchmarking Framework | ❌ Not started (`evaluation/*.py`, `scripts/run_benchmark.py`, `data/tasks.json`, `experiments/*` all 0 bytes) |
 | 8 | Streamlit Dashboard and Final Validation | ❌ Not started (`app.py` is 0 bytes) |
 
 **Working tree state:** 4 files modified but uncommitted (`agents/control_loop.py`, `agents/hybrid_agent.py`, `agents/prompts.py`, `tests/test_hybrid_agent.py`), plus 2 stray `.bak` files. Commit `96dd81a` is "phase 5 almost complete"; the uncommitted diff is the actual Phase 5 work-in-progress.
 
-**Latest test result (2026-11-15):** 41 tests, 41 passed, 0 failed.
+**Latest test result (2026-11-15):** 52 tests, 52 passed, 0 failed.
 - `tests/test_agents.py` — 7/7 pass.
-- `tests/test_hybrid_agent.py` — 21/21 pass.
+- `tests/test_hybrid_agent.py` — 32/32 pass (Phase 5 authorization + evidence scenarios added).
 - `tests/test_tools.py` — 13/13 pass.
 
 ---
@@ -62,20 +62,33 @@ Legend: ✅ Complete · ⚠️ Implemented but broken/unvalidated · ❌ Not sta
 - Validation: `tests/test_agents.py` **7/7 pass** (final response, tool-then-final, tool error handling, iteration limit, invalid JSON, empty task, invalid limit). All mocked (`FakeLLMClient`) — no network.
 - Remaining: none.
 
-## Phase 5 — Hybrid LLM + Jev Agent Integration ⚠️ Tests green; two known bugs remain
+## Phase 5 — Hybrid LLM + Jev Agent Integration ✅ Complete
 
 **Objective:** Groq plans + generates arguments + final response; Jev selects tools, detects completion/loops, estimates progress.
 
 - Implemented (uncommitted, on top of `96dd81a`):
   - `agents/hybrid_agent.py`: `HybridAgent`, `HybridAgentRunResult` (includes `decision_history`, `task_specification`), 3-phase `run()`, `_validate_task_specification()` (exact five-field set, type checks, `required_tools ⊆ allowed_tools`, `allowed_tools ⊆ registry`, duplicate check, **explicit-user-authorization regex for `create_support_ticket`**).
-  - `agents/control_loop.py`: `ControlLoop`, `ControlLoopResult`; Jev-controlled loop with completion threshold 0.70, loop threshold 0.70 + ≥2 tool calls + progress ≤ 0.20, `max_identical_calls=2` signature guard, `decision_history` recording, `_has_valid_evidence`, `_get_fulfilled_required_tools`.
+  - `agents/control_loop.py`: `ControlLoop`, `ControlLoopResult`; Jev-controlled loop with completion threshold 0.70, loop threshold 0.70 + ≥2 tool calls + progress ≤ 0.20, `max_identical_calls=2` signature guard, `decision_history` recording, `_has_valid_evidence`, `_get_fulfilled_required_tools`, `_required_tools_fulfilled`.
   - `agents/prompts.py`: `build_hybrid_planning_prompt(task, available_tools)` returns `plan` + five-field `task_specification`; `build_hybrid_argument_prompt`; `build_hybrid_final_prompt`.
-- **Verified result: 21/21 hybrid tests pass** (`tests/test_hybrid_agent.py`). Full suite: **41/41 pass**.
+- **Verified result: 32/32 hybrid tests pass** (`tests/test_hybrid_agent.py`). Full suite: **52/52 pass**.
 - **Task specification contract (five fields):** `objective` (non-empty string), `required_outcomes` (non-empty list of strings), `allowed_tools` (non-empty list of registered tool names, no duplicates), `required_tools` (list of strings, each must be in `allowed_tools`, may be empty), `completion_criteria` (non-empty list of strings).
-- Remaining before this phase can be called complete:
-  1. Fix `control_loop.py:251` (allowed-tools filter overwritten by full registry) — known safety bug, deliberately deferred.
-  2. Wire `_get_fulfilled_required_tools` into the completion decision or remove it (currently dead code).
-  3. At least one live end-to-end Mode B run with recorded metrics.
+- **Tool authorization (fixed):** the planner's `allowed_tools` filter is never overwritten; Jev only sees allowed tools; `selected_tool ∉ allowed_tools` → `unauthorized_jev_tool_selection`; an unregistered name inside `allowed_tools` → `unauthorized_tool_configuration`; execution runs only through `registry.execute` on the selected tool; the `create_support_ticket` explicit-user-authorization guard in `hybrid_agent.py` is unchanged.
+- **Evidence-gated completion (implemented):** Jev completion alone never establishes success. `_required_tools_fulfilled` requires every mandatory tool to have executed with valid evidence (`_has_valid_evidence`); Jev confirmation with incomplete evidence stops with `required_tools_not_fulfilled` (success stays `False`); failed executions and malformed evidence do not count; empty `required_tools` imposes no evidence requirement; the distinction between tool execution success and task completion is preserved.
+- Remaining: none. Live end-to-end Mode B validation completed 2026-11-15.
+
+### Phase 5 live validation (2026-11-15)
+
+One controlled, read-only live run: `python scripts/run_hybrid.py --task "Check the current VPN service status."`
+
+- **Outcome: SUCCESS** (`success=true`, `termination_reason=jev_detected_completion`).
+- The planner generated a valid five-field specification with `allowed_tools=["check_service_status"]` and `required_tools=["check_service_status"]`.
+- Jev (`jev-1.14.0`) selected `check_service_status` in both iterations; the tool executed successfully; evidence was verified; Jev confirmed completion (0.75 ≥ 0.70) on iteration 2.
+- Metrics: LLM 1660 in / 289 out / 1949 total tokens, 3.0518 s; Jev 1624 in / 156 out / 1780 total tokens, 2.8672 s; combined 3729 tokens; total latency 5.9197 s; 2 iterations, 1 tool call.
+- Jev confidence was 1.0 on both selections; completion probabilities 0.03 → 0.75; progress score 0.02 → 3.39; loop probability 0.04 → 0.82 (loop guard correctly did not fire: negligible progress condition failed).
+- Final response: "The VPN service is currently experiencing degraded performance. It is encountering intermittent connectivity issues."
+- Full trace stored in `experiments/experiment_logs.jsonl`; metrics row in `experiments/results.csv`.
+- Blocker fixed first: both runners raised `ModuleNotFoundError: No module named 'agents'` when invoked as `python scripts/run_hybrid.py` (cwd not on `sys.path`); `scripts/run_hybrid.py` now inserts the project root. `scripts/run_baseline.py` has the same pre-existing defect, left untouched per the no-unrelated-refactor constraint.
+- `scripts/run_hybrid.py` now appends each run to the experiments structure (CSV + JSONL).
 
 ## Phase 6 — Uncertainty Detection and Escalation ❌
 
@@ -98,6 +111,6 @@ Legend: ✅ Complete · ⚠️ Implemented but broken/unvalidated · ❌ Not sta
 
 ## Discrepancies vs. historical claims
 
-- README status checklist is stale (says "Tool environment / baseline / hybrid / escalation / dashboard" all unchecked) — contradicts phases 1–4 being complete.
-- Historical "20/20" and "35/35 passing" claims are **both outdated**. Current suite has **35 tests: 22 pass, 13 fail**.
-- `documentations/01–06` are phase-level design/validation notes; they describe intended behavior, some of which (e.g. `required_tools`, evidence-based completion) is only partially implemented.
+- README status checklist is stale (says "Tool environment / baseline / hybrid / escalation / dashboard" all unchecked) — contradicts phases 1–5 being complete.
+- Historical "20/20" and "35/35 passing" claims are **both outdated**. Current suite has **52 tests: 52 pass, 0 fail**.
+- `documentations/01–06` are phase-level design/validation notes; they describe intended behavior. The `required_tools` and evidence-based completion behaviour they describe is now implemented and tested.

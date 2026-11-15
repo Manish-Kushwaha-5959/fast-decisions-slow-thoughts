@@ -1,0 +1,2 @@
+timestamp,mode,task,success,termination_reason,iterations,llm_input_tokens,llm_output_tokens,llm_total_tokens,llm_latency_seconds,jev_input_tokens,jev_output_tokens,jev_total_tokens,jev_latency_seconds,tool_latency_seconds,total_latency_seconds,combined_tokens
+2026-11-15T13:43:30.632000+00:00,B,Check the current VPN service status.,True,jev_detected_completion,2,1660,289,1949,3.0518,1624,156,1780,2.8672,0.0,5.9197,3729

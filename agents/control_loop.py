@@ -188,6 +188,29 @@ class ControlLoop:
             if tool in fulfilled
         ]
 
+    def _required_tools_fulfilled(
+        self,
+        required_tools: list[str],
+        tool_history: list[dict]
+    ) -> bool:
+        """
+        True only when every mandatory tool has executed successfully
+        and produced structurally valid evidence.
+
+        An empty required_tools list imposes no evidence requirement
+        and therefore returns True; the Jev completion probability
+        remains the sole completion signal for such tasks.
+        """
+        if not required_tools:
+            return True
+
+        fulfilled = self._get_fulfilled_required_tools(
+            required_tools,
+            tool_history
+        )
+
+        return len(fulfilled) == len(required_tools)
+
 
     def _record_jev_usage(self, result, decision):
         result.jev_input_tokens += decision.input_tokens
@@ -219,6 +242,25 @@ class ControlLoop:
             allowed_tools = task_specification["allowed_tools"]
             required_tools = task_specification["required_tools"]
 
+            # An allowed tool that is not registered cannot be
+            # executed. Reject it instead of crashing on lookup.
+            unknown_allowed = [
+                name for name in allowed_tools
+                if name not in all_tools
+            ]
+
+            if unknown_allowed:
+                result.termination_reason = (
+                    "unauthorized_tool_configuration"
+                )
+                result.final_response = (
+                    "The task specification authorised tools that "
+                    "are not registered: "
+                    + ", ".join(unknown_allowed)
+                    + ". Execution was stopped for safety."
+                )
+                return result
+
             available_tools = {
                 name: all_tools[name]
                 for name in allowed_tools
@@ -247,8 +289,6 @@ class ControlLoop:
 
         call_counts = {}
         consecutive_no_progress = 0
-
-        available_tools = self.registry.get_tool_descriptions()
 
         for iteration in range(self.max_iterations + 1):
             state["iteration"] = iteration + 1
@@ -300,10 +340,44 @@ class ControlLoop:
                 "loop_probability": loop_probability
             })
 
+            # Completion requires both Jev's confirmation and valid
+            # execution evidence for every mandatory tool. Jev's
+            # prediction alone never establishes task success.
+            state["fulfilled_required_tools"] = (
+                self._get_fulfilled_required_tools(
+                    required_tools,
+                    state["tool_history"]
+                )
+            )
+
+            required_tools_fulfilled = (
+                self._required_tools_fulfilled(
+                    required_tools,
+                    state["tool_history"]
+                )
+            )
+
             # Completion takes priority over further tool selection.
-            if completion_probability >= self.completion_threshold:
+            if (
+                completion_probability >= self.completion_threshold
+                and required_tools_fulfilled
+            ):
                 result.success = True
                 result.termination_reason = "jev_detected_completion"
+                break
+
+            if (
+                completion_probability >= self.completion_threshold
+                and not required_tools_fulfilled
+            ):
+                result.termination_reason = (
+                    "required_tools_not_fulfilled"
+                )
+                result.final_response = (
+                    "The control system predicted task completion, "
+                    "but not every required tool produced valid "
+                    "execution evidence. Execution was stopped."
+                )
                 break
 
             # A high model-predicted loop probability alone is not
@@ -341,10 +415,13 @@ class ControlLoop:
             selected_tool = decision.selected_tool
 
             if selected_tool not in available_tools:
-                result.termination_reason = "invalid_jev_tool_selection"
+                result.termination_reason = (
+                    "unauthorized_jev_tool_selection"
+                )
                 result.final_response = (
                     "The control system selected a tool that is not "
-                    "registered. Execution was stopped for safety."
+                    "authorised for this task. Execution was stopped "
+                    "for safety."
                 )
                 break
 

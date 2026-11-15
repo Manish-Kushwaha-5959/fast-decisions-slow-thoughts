@@ -1,29 +1,26 @@
 # Known Issues
 
-Ordered by severity. All line numbers refer to the working tree as of 2026-11-15 (uncommitted Phase 5 state).
+Ordered by severity. All line numbers refer to the working tree as of 2026-11-16 (uncommitted Phase 5 state, post live validation).
 
-## 🟢 1. Hybrid test suite is green (21/21) — contract fixed
+## 🟢 1. Hybrid test suite is green (32/32) — contract fixed, live-validated
 
-- **Resolved:** The five-field `task_specification` contract is now consistent across `prompts.py`, `hybrid_agent.py`, and `control_loop.py`. Mocks emit valid specs; 21/21 hybrid tests pass (41/41 total).
-- **Remaining risk:** the contract is only enforced by unit tests with mocks; no live planner run has yet produced a real five-field spec.
+- **Resolved:** The five-field `task_specification` contract is now consistent across `prompts.py`, `hybrid_agent.py`, and `control_loop.py`. Mocks emit valid specs; 32/32 hybrid tests pass (52/52 total).
+- **Live-validated 2026-11-15:** the real planner produced a valid five-field spec in the recorded Mode B run (`experiments/experiment_logs.jsonl`), with `allowed_tools=["check_service_status"]` and `required_tools=["check_service_status"]`.
 
-## 🔴 2. `allowed_tools` restriction is silently discarded
+## 🟢 2. `allowed_tools` restriction was silently discarded — fixed, live-validated
 
-- **Where:** `agents/control_loop.py` lines 219–227 compute a filtered `available_tools` from `task_specification["allowed_tools"]`, but line 251 overwrites it with `available_tools = self.registry.get_tool_descriptions()` (all tools) before the loop.
-- **Impact:** Jev can select tools the planner did not authorise, and the `invalid_jev_tool_selection` guard validates against the full registry rather than the allowed subset. The planner's authorisation is effectively unenforced.
-- **Related safety gap:** the explicit-user-authorization regex for `create_support_ticket` in `agents/hybrid_agent.py` only guards the planner's `allowed_tools` list. Because of this bug, a ticket could still be executed via a Jev selection without that check ever running.
-- **Fix:** delete line 251 (or re-apply the filter), and decide whether `selected_tool not in allowed_tools` should terminate.
+- **Resolved:** the full-registry overwrite (former `control_loop.py` line 251) is removed. `available_tools` is the registry filtered through `allowed_tools` for the whole run; Jev only sees allowed tools, `selected_tool ∉ available_tools` → `unauthorized_jev_tool_selection`, an unregistered name inside `allowed_tools` → `unauthorized_tool_configuration`, and execution runs only through `registry.execute` on the selected tool. The `create_support_ticket` explicit-user-authorization guard in `hybrid_agent.py` is unchanged and covered by tests.
+- **Live-validated 2026-11-15:** the real run executed only the authorised `check_service_status`; no unauthorised tool was selected or executed.
 
-## 🟠 3. Required-tools / evidence logic is dead code
+## 🟢 3. Required-tools / evidence gate is now wired (was dead code)
 
-- **Where:** `agents/control_loop.py` — `_has_valid_evidence()` and `_get_fulfilled_required_tools()` are implemented; `state["fulfilled_required_tools"]` is initialized to `[]` but never updated; `consecutive_no_progress` is initialized but never used.
-- **Impact:** The intended "Jev completion + all required tools produced valid evidence" completion rule is not enforced. `_get_fulfilled_required_tools` is never called.
-- **Fix:** either call `_get_fulfilled_required_tools(required_tools, tool_history)` before accepting `jev_detected_completion`, or remove the dead helpers and the `required_tools` plumbing.
+- **Resolved:** `_required_tools_fulfilled` calls `_get_fulfilled_required_tools` before accepting `jev_detected_completion`; `state["fulfilled_required_tools"]` is recomputed every iteration; Jev completion without full evidence stops with `required_tools_not_fulfilled` (success stays `False`). Failed executions and malformed evidence never count.
+- **Remaining:** `consecutive_no_progress` is still initialised but never used (pre-existing, harmless).
 
-## 🟠 4. No benchmark or experiment data exists
+## 🟠 4. No benchmark or experiment data exists — first run recorded
 
-- **Where:** `experiments/results.csv` (0 bytes), `experiments/experiment_logs.jsonl` (0 bytes), `data/tasks.json` (0 bytes), `scripts/run_benchmark.py` (0 bytes).
-- **Impact:** The research questions (token/latency/success comparison A vs B) cannot be answered yet. Historical "20/20" and "35/35" claims are not reproducible.
+- **Where:** `experiments/results.csv` and `experiments/experiment_logs.jsonl` now hold the single 2026-11-15 Mode B run (success, 3729 combined tokens, 5.92 s); `scripts/run_hybrid.py` appends each run to both files. `data/tasks.json` (0 bytes) and `scripts/run_benchmark.py` (0 bytes) remain empty.
+- **Impact:** The research questions (token/latency/success comparison A vs B) still cannot be answered from one run. Historical "20/20" and "35/35" claims are not reproducible.
 - **Fix:** Phase 7 — implement task verification, metrics aggregation, cost model, and a task set.
 
 ## 🟠 5. Phase 6/8 modules are empty placeholders
@@ -33,11 +30,12 @@ Ordered by severity. All line numbers refer to the working tree as of 2026-11-15
 - `evaluation/logger.py`, `evaluation/metrics.py`, `evaluation/task_verifier.py` (0 bytes) — no logging/metrics/verification.
 - `tests/test_jev_client.py` (0 bytes) — no Jev client unit tests.
 
-## 🟡 6. Loop-detection heuristic is strict and unvalidated
+## 🟡 6. Loop-detection heuristic is strict and partially live-observed
 
-- **Where:** `agents/control_loop.py` lines ~319–330.
+- **Where:** `agents/control_loop.py` loop-guard block (~lines 385–405).
 - **What:** Termination requires `loop_probability >= 0.70` AND `len(tool_calls) >= 2` AND `progress_score/5.0 <= 0.20`. This fixes the historical "premature loop termination" complaint but is based on an assumed 0–5 progress scale.
-- **Impact:** If Jev's Score returns a different scale, `has_negligible_progress` misbehaves silently. No live data validates the threshold.
+- **Live observation (2026-11-15):** Jev returned progress 0.02 → 3.39 and loop probability 0.04 → 0.82 on a healthy run; the guard correctly did not fire because the progress condition failed. One healthy-run data point is not threshold validation.
+- **Impact:** If Jev's Score returns a different scale, `has_negligible_progress` misbehaves silently.
 
 ## 🟡 7. No unit coverage for the two API clients
 
@@ -57,11 +55,12 @@ Ordered by severity. All line numbers refer to the working tree as of 2026-11-15
 
 ## 🟢 10. Minor code-quality items
 
-- `except (ToolExecutionError, Exception)` in `control_loop.py` (~line 430) is redundant (`Exception` subsumes it).
+- `except (ToolExecutionError, Exception)` in `control_loop.py` (~line 505) is redundant (`Exception` subsumes it).
 - The `for … else: maximum_iterations_reached` clause in `ControlLoop.run` is effectively unreachable — the inner `if len(result.tool_calls) >= self.max_iterations: break` always fires first.
 - `_parse_json` is duplicated between `control_loop.py` and `hybrid_agent.py` (near-identical); `_parse_action` in `baseline_agent.py` is a third variant.
 - `ControlLoop.run` evaluates Jev `max_iterations + 1` times (extra post-final-call evaluation is intentional and tested, but undocumented in the code comment).
-- README status checklist is stale (all post-Phase-1 items unchecked despite phases 1–4 being complete).
+- `scripts/run_baseline.py` has the same pre-existing `ModuleNotFoundError: No module named 'agents'` defect that was fixed in `scripts/run_hybrid.py` (cwd not on `sys.path`); left untouched per the no-unrelated-refactor constraint of the Phase 5 live-validation task.
+- README status checklist is stale (all post-Phase-1 items unchecked despite phases 1–5 being complete).
 
 ## 🔒 11. Secret hygiene
 

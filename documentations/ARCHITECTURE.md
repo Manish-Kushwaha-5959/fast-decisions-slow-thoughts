@@ -63,16 +63,20 @@ Groq decides: plan, tool, arguments, continuation, completion. Errors: `invalid_
 - Failure → `termination_reason = "planning_error"`, no Jev call.
 
 ### Phase 2 — Control Loop (`ControlLoop.run`)
+The loop receives only the planner-authorised tools: `available_tools` is the registry filtered through `task_specification["allowed_tools"]` for the **entire** run (the full registry is never restored). An allowed tool missing from the registry terminates immediately with `unauthorized_tool_configuration`.
+
 Per iteration (max `max_iterations+1` evaluations):
 1. **Jev** `evaluate_state(state, available_tools)` → decision; appended to `decision_history` and `progress_history`.
-2. If `completion_probability >= 0.70` → stop `jev_detected_completion` (success).
+2. **Evidence-gated completion:** recompute `fulfilled_required_tools` from `tool_history`. Stop with success `jev_detected_completion` only when `completion_probability >= 0.70` **AND** every tool in `required_tools` has valid evidence. If Jev confirms completion but evidence is incomplete → stop `required_tools_not_fulfilled` (not success). An empty `required_tools` imposes no evidence requirement.
 3. **Loop guard:** requires `loop_probability >= 0.70` **AND** ≥2 completed tool calls **AND** normalized progress ≤ 0.20 → stop `jev_detected_loop`.
 4. If `len(tool_calls) >= max_iterations` → stop `maximum_iterations_reached`.
-5. Validate `selected_tool ∈ available_tools` (full registry) → else `invalid_jev_tool_selection`.
+5. Validate `selected_tool ∈ available_tools` (the **allowed subset**) → else `unauthorized_jev_tool_selection`.
 6. **Groq** generates arguments only (`build_hybrid_argument_prompt`), parsed to `{"arguments": {...}}` → else `argument_generation_error`.
 7. Deterministic repeat guard: identical `(tool, args)` signature blocked after `max_identical_calls=2` → `repeated_tool_call`.
-8. `registry.execute(selected_tool, arguments)`; record call + latency; append to history.
+8. `registry.execute(selected_tool, arguments)` (the only execution path, so unauthorised tools cannot run); record call + latency; append to history.
 9. After loop: if not stopped, `maximum_iterations_reached`.
+
+**Evidence rules** (`_has_valid_evidence`): execution status must be `"success"`, the result a dict without `"error"`, plus per-tool structural checks — `check_service_status` needs `status ∈ {operational, degraded, outage}` and `source == "local_simulation"`; `search_knowledge_base` needs a non-empty `results` list and `result_count > 0`; `create_support_ticket` needs a non-empty `ticket_id`, `status == "created"` and `simulation is True`; unknown tools fall back to truthiness. Failed or malformed executions never count as fulfilled.
 
 ### Phase 3 — Final Response (Groq)
 - `jev_error` → hard-coded failure message (no Groq call).
@@ -119,4 +123,4 @@ Per iteration (max `max_iterations+1` evaluations):
 - `GroqClientError`: rate limit, connection, API status, unexpected.
 - `JevClientError`: any Jev SDK exception.
 - `ToolExecutionError`: unknown tool, non-dict args, missing/unexpected args, tool function exception.
-- Agent-level: `planning_error`, `argument_generation_error`, `jev_error`, `invalid_jev_tool_selection`, `repeated_tool_call`, `invalid_llm_response`, `maximum_iterations_reached`, `no_tool_execution_required`.
+- Agent-level: `planning_error`, `argument_generation_error`, `jev_error`, `unauthorized_jev_tool_selection`, `unauthorized_tool_configuration`, `required_tools_not_fulfilled`, `repeated_tool_call`, `invalid_llm_response`, `maximum_iterations_reached`, `no_tool_execution_required`.

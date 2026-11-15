@@ -253,11 +253,14 @@ def test_hybrid_accepts_valid_five_field_specification():
             plan_response(
                 required_tools=["check_service_status"]
             ),
+            arguments_response("VPN"),
             final_response()
         ],
         jev_decisions=[
+            make_jev_decision(),
             make_jev_decision(
-                completion_probability=0.95
+                completion_probability=0.95,
+                progress_score=5.0
             )
         ]
     )
@@ -267,6 +270,7 @@ def test_hybrid_accepts_valid_five_field_specification():
     )
 
     assert result.success is True
+    assert result.termination_reason == "jev_detected_completion"
 
     # The validated specification preserves required_tools.
     assert result.task_specification["required_tools"] == [
@@ -277,9 +281,17 @@ def test_hybrid_accepts_valid_five_field_specification():
         "check_service_status"
     ]
 
-    # Planning succeeded; Jev evaluated completion immediately.
-    assert len(jev.calls) == 1
-    assert len(llm.calls) == 2
+    # The mandatory tool executed successfully before Jev's
+    # completion signal was accepted.
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0]["tool_name"] == (
+        "check_service_status"
+    )
+    assert result.tool_calls[0]["execution_status"] == "success"
+
+    # Planning, argument generation, and final response.
+    assert len(jev.calls) == 2
+    assert len(llm.calls) == 3
 
 
 def test_hybrid_rejects_missing_required_field():
@@ -559,7 +571,7 @@ def test_hybrid_rejects_unregistered_jev_tool():
 
     assert result.success is False
     assert result.termination_reason == (
-        "invalid_jev_tool_selection"
+        "unauthorized_jev_tool_selection"
     )
     assert result.tool_calls == []
 
@@ -709,8 +721,389 @@ def test_hybrid_handles_jev_api_error():
 
 
 # ---------------------------------------------------------
-# Metrics tests
+# Tool authorization tests (Phase 5)
 # ---------------------------------------------------------
+
+def test_hybrid_executes_authorised_tool():
+    """A tool inside allowed_tools may be selected and executed."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(allowed_tools=["check_service_status"]),
+            arguments_response("VPN"),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(selected_tool="check_service_status"),
+            make_jev_decision(
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is True
+    assert result.tool_calls[0]["tool_name"] == (
+        "check_service_status"
+    )
+    assert result.tool_calls[0]["execution_status"] == "success"
+
+
+def test_hybrid_blocks_tool_outside_allowed_tools():
+    """Jev cannot select a tool the planner excluded."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(allowed_tools=["check_service_status"]),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                selected_tool="create_support_ticket"
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is False
+    assert result.termination_reason == (
+        "unauthorized_jev_tool_selection"
+    )
+    assert result.tool_calls == []
+
+    # Groq is never asked to argue for an unauthorised tool.
+    assert len(llm.calls) == 2
+    assert len(jev.calls) == 1
+
+
+def test_hybrid_keeps_ticket_authorization_guard():
+    """create_support_ticket stays gated on explicit user request."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                allowed_tools=[
+                    "check_service_status",
+                    "create_support_ticket"
+                ],
+                required_tools=[]
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is False
+    assert result.termination_reason == "planning_error"
+    assert "explicitly requested" in result.final_response.lower()
+
+    # The authorisation failure must stop the run before Jev.
+    assert len(jev.calls) == 0
+    assert len(llm.calls) == 1
+
+
+def test_hybrid_allows_ticket_when_user_authorises():
+    """Explicit user request permits the state-changing tool."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                allowed_tools=[
+                    "create_support_ticket"
+                ],
+                required_tools=["create_support_ticket"],
+                objective=(
+                    "Create a support ticket for a payment failure."
+                )
+            ),
+            (
+                '{"arguments": {"issue": "Payment portal down", '
+                '"priority": "high"}}'
+            ),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                selected_tool="create_support_ticket"
+            ),
+            make_jev_decision(
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Please create a support ticket for the payment failure."
+    )
+
+    assert result.success is True
+    assert result.tool_calls[0]["tool_name"] == (
+        "create_support_ticket"
+    )
+    assert result.tool_calls[0]["execution_status"] == "success"
+    assert result.tool_calls[0]["result"]["status"] == "created"
+
+
+# ---------------------------------------------------------
+# Evidence-gated completion tests (Phase 5)
+# ---------------------------------------------------------
+
+def test_hybrid_completion_requires_required_tool_evidence():
+    """Jev completion alone is not success when a mandatory tool
+    has not produced valid evidence."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                allowed_tools=["check_service_status"],
+                required_tools=["check_service_status"]
+            ),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                completion_probability=0.95
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is False
+    assert result.termination_reason == (
+        "required_tools_not_fulfilled"
+    )
+    assert result.tool_calls == []
+    assert result.decision_history[-1][
+        "completion_probability"
+    ] == 0.95
+
+
+def test_hybrid_failed_tool_execution_is_not_evidence():
+    """A failed mandatory execution cannot satisfy the gate."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                allowed_tools=["check_service_status"],
+                required_tools=["check_service_status"]
+            ),
+            arguments_response(""),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(),
+            make_jev_decision(
+                completion_probability=0.95
+            )
+        ]
+    )
+
+    # An empty service argument fails execution, so the mandatory
+    # tool never produces valid evidence.
+    result = agent.run(
+        "Check the current VPN service status."
+    )
+
+    assert result.success is False
+    assert result.termination_reason == (
+        "required_tools_not_fulfilled"
+    )
+    assert len(result.tool_calls) == 1
+    assert result.tool_calls[0]["execution_status"] == "error"
+    assert "error" in result.tool_calls[0]["result"]
+
+
+def test_hybrid_invalid_evidence_does_not_complete():
+    """Structurally invalid evidence is not completion evidence."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                allowed_tools=["check_service_status"],
+                required_tools=["check_service_status"]
+            ),
+            arguments_response("NotARealService"),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(),
+            make_jev_decision(
+                completion_probability=0.95
+            )
+        ]
+    )
+
+    # "unknown" status fails the check_service_status evidence rule.
+    result = agent.run(
+        "Check the current NotARealService service status."
+    )
+
+    assert result.success is False
+    assert result.termination_reason == (
+        "required_tools_not_fulfilled"
+    )
+
+
+def test_hybrid_all_required_tools_with_evidence_complete():
+    """Every mandatory tool with valid evidence permits completion."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                allowed_tools=[
+                    "check_service_status",
+                    "search_knowledge_base"
+                ],
+                required_tools=[
+                    "check_service_status",
+                    "search_knowledge_base"
+                ]
+            ),
+            arguments_response("VPN"),
+            (
+                '{"arguments": {"query": "wifi connection"}}'
+            ),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                selected_tool="check_service_status"
+            ),
+            make_jev_decision(
+                selected_tool="search_knowledge_base"
+            ),
+            make_jev_decision(
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the VPN status and find Wi-Fi troubleshooting steps."
+    )
+
+    assert result.success is True
+    assert result.termination_reason == "jev_detected_completion"
+
+    executed = [
+        call["tool_name"] for call in result.tool_calls
+    ]
+    assert executed == [
+        "check_service_status",
+        "search_knowledge_base"
+    ]
+
+    assert all(
+        call["execution_status"] == "success"
+        for call in result.tool_calls
+    )
+
+
+def test_hybrid_partial_required_tools_block_completion():
+    """Completion is blocked until every mandatory tool succeeds."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                allowed_tools=[
+                    "check_service_status",
+                    "search_knowledge_base"
+                ],
+                required_tools=[
+                    "check_service_status",
+                    "search_knowledge_base"
+                ]
+            ),
+            arguments_response("VPN"),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                selected_tool="check_service_status"
+            ),
+            make_jev_decision(
+                completion_probability=0.95
+            )
+        ]
+    )
+
+    result = agent.run(
+        "Check the VPN status and find Wi-Fi troubleshooting steps."
+    )
+
+    assert result.success is False
+    assert result.termination_reason == (
+        "required_tools_not_fulfilled"
+    )
+
+    # Only the first mandatory tool executed; the second was
+    # never attempted, so evidence is incomplete.
+    assert len(result.tool_calls) == 1
+
+
+def test_hybrid_rejects_unknown_allowed_tool_configuration():
+    """An allowed tool missing from the registry is rejected cleanly."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                completion_probability=0.95
+            )
+        ]
+    )
+
+    # Bypass the planner validator, which would already reject the
+    # unregistered tool, and feed the control loop directly.
+    loop_result = agent.control_loop.run(
+        task="Check the current VPN service status.",
+        plan="Check the status.",
+        task_specification={
+            "objective": "Check the current VPN service status.",
+            "required_outcomes": ["A service status result."],
+            "allowed_tools": ["check_service_status", "ghost_tool"],
+            "required_tools": ["check_service_status"],
+            "completion_criteria": ["A status result."]
+        }
+    )
+
+    assert loop_result.success is False
+    assert loop_result.termination_reason == (
+        "unauthorized_tool_configuration"
+    )
+    assert "ghost_tool" in loop_result.final_response
+    assert loop_result.tool_calls == []
+
+
+def test_hybrid_empty_required_tools_completes_on_jev():
+    """An empty required_tools list imposes no evidence gate."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(required_tools=[]),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                completion_probability=0.95
+            )
+        ]
+    )
+
+    result = agent.run(
+        "I need no additional support."
+    )
+
+    assert result.success is True
+    assert result.termination_reason == "jev_detected_completion"
+    assert result.tool_calls == []
+    assert result.task_specification["required_tools"] == []
 
 def test_hybrid_records_llm_and_jev_metrics():
     agent, llm, jev = make_agent(
