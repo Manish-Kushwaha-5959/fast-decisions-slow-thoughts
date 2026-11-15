@@ -20,14 +20,14 @@ Three experimental modes share one tool registry and one tool set:
 |---|---|---|
 | **A** | LLM-only | Groq controls planning, tool selection, argument generation, completion, loop detection. |
 | **B** | LLM + Jev (hybrid) | Groq does planning, argument generation, final response. Jev does tool selection, completion detection, loop detection, progress estimation. |
-| **C** | Hybrid with uncertainty-aware escalation | Jev handles control decisions; uncertain decisions are escalated to Groq. **Not yet implemented.** |
+| **C** | Hybrid with uncertainty-aware escalation | Jev handles control decisions; uncertain tool selections (low confidence) and ambiguous completion probabilities are escalated to Groq for advisory review. Implemented in Phase 6; Groq advises only — all controller safeguards still apply. |
 
 ## 3. Research Questions
 
 1. Does Jev-assisted tool selection reduce token consumption vs. LLM-only selection?
 2. Does Jev-assisted completion/loop detection improve task success rate and reduce wasted tool calls?
 3. Is Jev's reported confidence calibrated to empirical correctness? (Not yet measured.)
-4. Does uncertainty-aware escalation (Mode C) improve success at an acceptable cost? (Not yet implemented.)
+4. Does uncertainty-aware escalation (Mode C) improve success at an acceptable cost? (Implemented in Phase 6 as a working MVP; effectiveness not yet measured — requires Phase 7 benchmarking.)
 
 ## 4. Measured Metrics (per run)
 

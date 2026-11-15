@@ -306,3 +306,137 @@ Return exactly one JSON object:
 }}
 """.strip()
 
+
+def build_escalation_tool_prompt(
+    task: str,
+    plan: str,
+    task_specification: dict,
+    proposed_tool: str,
+    tool_probability: float,
+    tool_confidence: float,
+    available_tools: dict[str, str],
+    tool_history: list[dict]
+) -> str:
+    """
+    Ask Groq to review a tool selection that Jev made with low
+    confidence. Groq recommends exactly one authorised tool.
+    """
+
+    tools_json = json.dumps(
+        available_tools,
+        indent=2,
+        ensure_ascii=False
+    )
+
+    return f"""
+You are the uncertainty-review component of a hybrid AI agent.
+
+The fast control system (Jev) was uncertain about which tool to use
+next and escalated the decision to you for review.
+
+USER REQUEST:
+{task}
+
+HIGH-LEVEL PLAN:
+{plan}
+
+TASK OBJECTIVE:
+{task_specification.get("objective", "")}
+
+REQUIRED OUTCOMES:
+{json.dumps(task_specification.get("required_outcomes", []), ensure_ascii=False)}
+
+ALLOWED TOOLS:
+{tools_json}
+
+REQUIRED TOOLS:
+{json.dumps(task_specification.get("required_tools", []), ensure_ascii=False)}
+
+COMPLETION CRITERIA:
+{json.dumps(task_specification.get("completion_criteria", []), ensure_ascii=False)}
+
+JEV PROPOSAL (UNCERTAIN):
+{{"selected_tool": {json.dumps(proposed_tool)}, "probability": {tool_probability}, "confidence": {tool_confidence}}}
+
+PREVIOUS TOOL HISTORY:
+{json.dumps(tool_history, indent=2, ensure_ascii=False)}
+
+RULES:
+- Recommend exactly ONE tool from the allowed tools list.
+- You may confirm Jev's proposal if it is reasonable.
+- Never recommend a tool outside the allowed tools list.
+- Do not generate tool arguments.
+- Do not invent tool results.
+- Base the recommendation on the user request and the evidence so far.
+
+Return exactly one JSON object:
+
+{{
+    "selected_tool": "exact_tool_name_from_allowed_list",
+    "reasoning": "Brief explanation of the recommendation"
+}}
+
+Return valid JSON only.
+Do not include Markdown code fences.
+Do not include text before or after the JSON object.
+""".strip()
+
+
+def build_escalation_completion_prompt(
+    task: str,
+    task_specification: dict,
+    completion_probability: float,
+    tool_history: list[dict]
+) -> str:
+    """
+    Ask Groq to judge whether an ambiguously complete task is actually
+    complete, based on the objective and the executed evidence.
+    """
+
+    return f"""
+You are the uncertainty-review component of a hybrid AI agent.
+
+The fast control system (Jev) is uncertain about whether the user's
+request has been completed and escalated the decision to you.
+
+USER REQUEST:
+{task}
+
+TASK OBJECTIVE:
+{task_specification.get("objective", "")}
+
+REQUIRED OUTCOMES:
+{json.dumps(task_specification.get("required_outcomes", []), ensure_ascii=False)}
+
+REQUIRED TOOLS:
+{json.dumps(task_specification.get("required_tools", []), ensure_ascii=False)}
+
+COMPLETION CRITERIA:
+{json.dumps(task_specification.get("completion_criteria", []), ensure_ascii=False)}
+
+JEV COMPLETION PROBABILITY (AMBIGUOUS): {completion_probability}
+
+ACTUAL TOOL EXECUTION HISTORY:
+{json.dumps(tool_history, indent=2, ensure_ascii=False)}
+
+RULES:
+- Answer true only when the execution history actually satisfies the
+  completion criteria.
+- A required tool that failed or never executed means the task is NOT
+  complete.
+- Never assume a tool succeeded without its recorded result.
+- If the evidence is insufficient, answer false so execution continues.
+- Do not invent results.
+
+Return exactly one JSON object:
+
+{{
+    "task_complete": true or false,
+    "reasoning": "Brief explanation based on the recorded evidence"
+}}
+
+Return valid JSON only.
+Do not include Markdown code fences.
+Do not include text before or after the JSON object.
+""".strip()
+

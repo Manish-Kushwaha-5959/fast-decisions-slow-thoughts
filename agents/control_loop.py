@@ -1,7 +1,7 @@
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional, TYPE_CHECKING
 
 from models.jev_client import JevClient, JevClientError
 from models.llm_client import GroqLLMClient
@@ -10,6 +10,9 @@ from tools.registry import (
     ToolExecutionError
 )
 from agents.prompts import build_hybrid_argument_prompt
+
+if TYPE_CHECKING:
+    from agents.escalation_agent import EscalationAgent
 
 
 @dataclass
@@ -56,7 +59,8 @@ class ControlLoop:
         max_iterations: int = 5,
         completion_threshold: float = 0.70,
         loop_threshold: float = 0.70,
-        max_identical_calls: int = 2
+        max_identical_calls: int = 2,
+        escalation_agent: Optional["EscalationAgent"] = None
     ):
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1.")
@@ -71,6 +75,9 @@ class ControlLoop:
         self.completion_threshold = completion_threshold
         self.loop_threshold = loop_threshold
         self.max_identical_calls = max_identical_calls
+        # Mode C: when present, uncertain Jev decisions are escalated
+        # to Groq. When None the loop behaves exactly like Mode B.
+        self.escalation_agent = escalation_agent
 
     @staticmethod
     def _parse_json(content: str) -> dict:
@@ -224,6 +231,13 @@ class ControlLoop:
         result.llm_total_tokens += response.total_tokens
         result.llm_latency_seconds += response.latency_seconds
 
+    def _record_escalation_usage(self, result, outcome):
+        """Accumulate Groq usage produced by an escalation review."""
+        result.llm_input_tokens += outcome.input_tokens
+        result.llm_output_tokens += outcome.output_tokens
+        result.llm_total_tokens += outcome.total_tokens
+        result.llm_latency_seconds += outcome.latency_seconds
+
     def run(
     self,
     task: str,
@@ -330,7 +344,17 @@ class ControlLoop:
                 "model": decision.model,
                 "input_tokens": decision.input_tokens,
                 "output_tokens": decision.output_tokens,
-                "latency_seconds": decision.latency_seconds
+                "latency_seconds": decision.latency_seconds,
+
+                # Mode C escalation fields. Present on every entry so
+                # the history format stays uniform; populated only when
+                # an escalation actually occurred.
+                "decision_type": "none",
+                "escalated": False,
+                "escalation_reason": None,
+                "groq_recommendation": None,
+                "final_decision": None,
+                "escalation_succeeded": None
             })
 
             state["progress_history"].append({
@@ -380,6 +404,61 @@ class ControlLoop:
                 )
                 break
 
+            # Mode C: ambiguous completion probability. Jev is
+            # uncertain, so Groq reviews the objective and the
+            # execution evidence. Groq advises only; the controller
+            # keeps final authority and the evidence gate can never
+            # be bypassed by a Groq recommendation.
+            if self.escalation_agent is not None:
+                should_escalate, _ = (
+                    self.escalation_agent.completion_required(
+                        completion_probability
+                    )
+                )
+
+                if should_escalate:
+                    outcome = (
+                        self.escalation_agent.escalate_completion(
+                            task=task,
+                            task_specification=(
+                                task_specification or {}
+                            ),
+                            completion_probability=(
+                                completion_probability
+                            ),
+                            tool_history=state["tool_history"]
+                        )
+                    )
+
+                    self._record_escalation_usage(result, outcome)
+
+                    # Groq can only confirm completion when every
+                    # mandatory tool has already produced valid
+                    # evidence; otherwise execution continues.
+                    completion_accepted = (
+                        outcome.succeeded
+                        and outcome.final_decision is True
+                        and required_tools_fulfilled
+                    )
+
+                    result.decision_history[-1].update({
+                        "decision_type": "task_completion",
+                        "escalated": True,
+                        "escalation_reason": outcome.reason,
+                        "groq_recommendation": (
+                            outcome.recommendation or None
+                        ),
+                        "final_decision": completion_accepted,
+                        "escalation_succeeded": outcome.succeeded
+                    })
+
+                    if completion_accepted:
+                        result.success = True
+                        result.termination_reason = (
+                            "groq_confirmed_completion"
+                        )
+                        break
+
             # A high model-predicted loop probability alone is not
             # sufficient evidence of a loop. Require multiple completed
             # tool calls and negligible progress before terminating.
@@ -424,6 +503,48 @@ class ControlLoop:
                     "for safety."
                 )
                 break
+
+            # Mode C: uncertain tool selection. Jev's pick is already
+            # authorised; if Groq's review recommends an authorised
+            # tool it replaces the pick, otherwise execution falls back
+            # to Jev's authorised selection.
+            if self.escalation_agent is not None:
+                should_escalate, _ = (
+                    self.escalation_agent.tool_selection_required(
+                        decision
+                    )
+                )
+
+                if should_escalate:
+                    outcome = (
+                        self.escalation_agent.escalate_tool_selection(
+                            task=task,
+                            plan=plan,
+                            task_specification=(
+                                task_specification or {}
+                            ),
+                            decision=decision,
+                            available_tools=available_tools,
+                            tool_history=state["tool_history"]
+                        )
+                    )
+
+                    self._record_escalation_usage(result, outcome)
+
+                    # outcome.final_decision is guaranteed to be an
+                    # authorised tool by EscalationAgent.
+                    selected_tool = outcome.final_decision
+
+                    result.decision_history[-1].update({
+                        "decision_type": "tool_selection",
+                        "escalated": True,
+                        "escalation_reason": outcome.reason,
+                        "groq_recommendation": (
+                            outcome.recommendation or None
+                        ),
+                        "final_decision": outcome.final_decision,
+                        "escalation_succeeded": outcome.succeeded
+                    })
 
             tool_definition = self.registry.get_tool(selected_tool)
 

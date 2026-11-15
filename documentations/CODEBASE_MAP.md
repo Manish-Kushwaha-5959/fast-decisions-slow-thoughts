@@ -6,10 +6,10 @@
 hybrid_agent_mvp/
 ├── agents/
 │   ├── baseline_agent.py       Mode A agent
-│   ├── control_loop.py         Mode B execution loop (Jev-controlled)
-│   ├── hybrid_agent.py         Mode B orchestrator
-│   ├── escalation_agent.py     *** 0 bytes — Phase 6 placeholder ***
-│   ├── prompts.py              all system/user prompt builders
+│   ├── control_loop.py         Mode B/C execution loop (Jev-controlled + escalation)
+│   ├── hybrid_agent.py         Mode B/C orchestrator (EscalationAgent wiring)
+│   ├── escalation_agent.py     Mode C uncertainty detection + Groq review (Phase 6)
+│   ├── prompts.py              all system/user prompt builders (incl. escalation)
 │   ├── control_loop.py.bak     uncommitted backup (329 lines)
 │   └── hybrid_agent.py.bak     uncommitted backup (287 lines)
 ├── config/
@@ -61,8 +61,9 @@ hybrid_agent_mvp/
 | `tools/ticket_manager.py` | `TicketManager`, module `ticket_manager`, `create_support_ticket()`, `reset_simulated_tickets()` |
 | `agents/prompts.py` | `build_baseline_system_prompt()`, `build_initial_user_message()`, `build_hybrid_planning_prompt()`, `build_hybrid_argument_prompt()`, `build_hybrid_final_prompt()` |
 | `agents/baseline_agent.py` | `AgentRunResult`, `BaselineAgent.run()`, `_parse_action()` |
-| `agents/control_loop.py` | `ControlLoopResult`, `ControlLoop.run()`, `_parse_json()`, `_normalise_probability()`, `_call_signature()`, `_has_valid_evidence()`, `_get_fulfilled_required_tools()` |
-| `agents/hybrid_agent.py` | `HybridAgentRunResult`, `HybridAgent.run()`, `_parse_json()`, `_validate_task_specification()` |
+| `agents/control_loop.py` | `ControlLoopResult`, `ControlLoop.run()`, `_parse_json()`, `_normalise_probability()`, `_call_signature()`, `_has_valid_evidence()`, `_get_fulfilled_required_tools()`; Mode C escalation branches + decision-history escalation fields |
+| `agents/hybrid_agent.py` | `HybridAgentRunResult`, `HybridAgent.run()`, `_parse_json()`, `_validate_task_specification()`; `EscalationAgent` construction + `mode` attribute |
+| `agents/escalation_agent.py` | `EscalationAgent` (`tool_selection_required`, `completion_required`, `escalate_tool_selection`, `escalate_completion`), `EscalationOutcome`, default thresholds |
 
 ## Module Dependency Graph
 

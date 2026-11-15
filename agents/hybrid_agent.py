@@ -6,10 +6,12 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from agents.control_loop import ControlLoop
+from agents.escalation_agent import EscalationAgent
 from agents.prompts import (
     build_hybrid_planning_prompt,
     build_hybrid_final_prompt
 )
+from config.settings import settings
 from models.jev_client import JevClient
 from models.llm_client import GroqLLMClient
 from tools.registry import ToolRegistry, build_default_registry
@@ -76,18 +78,25 @@ class HybridAgentRunResult:
 
 class HybridAgent:
     """
-    Hybrid customer-support agent (Mode B).
+    Hybrid customer-support agent (Mode B / Mode C).
 
     Groq:
     - High-level planning
     - Tool argument generation
     - Final response generation
+    - Uncertainty review when Jev escalates (Mode C)
 
     Jev:
     - Tool selection
     - Completion detection
     - Loop detection
     - Progress estimation
+
+    Mode C extends Mode B with uncertainty-driven escalation: Jev's
+    low-confidence tool selections and ambiguous completion
+    probabilities are sent to Groq for review. Groq advises; the
+    controller keeps final authority and every Phase 5 safeguard
+    (allowed_tools, ticket authorisation, evidence gate) still applies.
     """
 
     def __init__(
@@ -95,17 +104,46 @@ class HybridAgent:
         llm_client: Optional[GroqLLMClient] = None,
         jev_client: Optional[JevClient] = None,
         registry: Optional[ToolRegistry] = None,
-        max_iterations: int = 5
+        max_iterations: int = 5,
+        enable_escalation: bool = True,
+        tool_confidence_threshold: Optional[float] = None,
+        completion_ambiguity_lower: Optional[float] = None,
+        completion_ambiguity_upper: Optional[float] = None
     ):
         self.llm = llm_client or GroqLLMClient()
         self.jev = jev_client or JevClient()
         self.registry = registry or build_default_registry()
 
+        self.escalation_agent: Optional[EscalationAgent] = None
+
+        if enable_escalation:
+            self.escalation_agent = EscalationAgent(
+                llm_client=self.llm,
+                tool_confidence_threshold=(
+                    tool_confidence_threshold
+                    if tool_confidence_threshold is not None
+                    else settings.tool_confidence_threshold
+                ),
+                completion_ambiguity_lower=(
+                    completion_ambiguity_lower
+                    if completion_ambiguity_lower is not None
+                    else settings.completion_ambiguity_lower
+                ),
+                completion_ambiguity_upper=(
+                    completion_ambiguity_upper
+                    if completion_ambiguity_upper is not None
+                    else settings.completion_ambiguity_upper
+                )
+            )
+
+        self.mode = "C" if self.escalation_agent else "B"
+
         self.control_loop = ControlLoop(
             llm_client=self.llm,
             jev_client=self.jev,
             registry=self.registry,
-            max_iterations=max_iterations
+            max_iterations=max_iterations,
+            escalation_agent=self.escalation_agent
         )
 
     @staticmethod

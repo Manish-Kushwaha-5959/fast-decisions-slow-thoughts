@@ -11,16 +11,17 @@ Legend: ✅ Complete · ⚠️ Implemented but broken/unvalidated · ❌ Not sta
 | 3 | Tool Development and Registry | ✅ Complete (13/13 tool tests pass) |
 | 4 | LLM-Only Baseline Agent | ✅ Complete (7/7 baseline tests pass) |
 | 5 | Hybrid LLM + Jev Agent Integration | ✅ Complete (authorization enforced; evidence-gated completion wired; 32/32 hybrid tests pass) |
-| 6 | Uncertainty Detection and Escalation | ❌ Not started (`agents/escalation_agent.py` is 0 bytes) |
+| 6 | Uncertainty Detection and Escalation | ✅ Complete (Mode C escalation implemented; 25/25 escalation tests pass) |
 | 7 | Evaluation and Benchmarking Framework | ❌ Not started (`evaluation/*.py`, `scripts/run_benchmark.py`, `data/tasks.json`, `experiments/*` all 0 bytes) |
 | 8 | Streamlit Dashboard and Final Validation | ❌ Not started (`app.py` is 0 bytes) |
 
 **Working tree state:** 4 files modified but uncommitted (`agents/control_loop.py`, `agents/hybrid_agent.py`, `agents/prompts.py`, `tests/test_hybrid_agent.py`), plus 2 stray `.bak` files. Commit `96dd81a` is "phase 5 almost complete"; the uncommitted diff is the actual Phase 5 work-in-progress.
 
-**Latest test result (2026-11-15):** 52 tests, 52 passed, 0 failed.
+**Latest test result (2026-11-16):** 77 tests, 77 passed, 0 failed.
 - `tests/test_agents.py` — 7/7 pass.
-- `tests/test_hybrid_agent.py` — 32/32 pass (Phase 5 authorization + evidence scenarios added).
+- `tests/test_hybrid_agent.py` — 32/32 pass (Phase 5 authorization + evidence scenarios intact).
 - `tests/test_tools.py` — 13/13 pass.
+- `tests/test_escalation.py` — 25/25 pass (Phase 6 escalation scenarios added).
 
 ---
 
@@ -90,11 +91,30 @@ One controlled, read-only live run: `python scripts/run_hybrid.py --task "Check 
 - Blocker fixed first: both runners raised `ModuleNotFoundError: No module named 'agents'` when invoked as `python scripts/run_hybrid.py` (cwd not on `sys.path`); `scripts/run_hybrid.py` now inserts the project root. `scripts/run_baseline.py` has the same pre-existing defect, left untouched per the no-unrelated-refactor constraint.
 - `scripts/run_hybrid.py` now appends each run to the experiments structure (CSV + JSONL).
 
-## Phase 6 — Uncertainty Detection and Escalation ❌
+## Phase 6 — Uncertainty Detection and Escalation ✅ Complete
 
-- `agents/escalation_agent.py` exists but is **0 bytes**.
-- Design intent (from `documentations/risks.md` / `timeline.md`): escalate Choice decisions when selected-tool probability < 0.60; escalate Noul completion when probability in [0.30, 0.70]; thresholds configurable.
-- No code, no tests. Not started.
+- **Objective:** Mode C — Jev stays the fast controller; uncertain decisions are escalated to Groq for advisory review.
+- **Implemented:**
+  - `agents/escalation_agent.py` — `EscalationAgent` (threshold checks `tool_selection_required` / `completion_required`; Groq review calls `escalate_tool_selection` / `escalate_completion`) and `EscalationOutcome` dataclass.
+  - `agents/prompts.py` — `build_escalation_tool_prompt` and `build_escalation_completion_prompt`.
+  - `agents/control_loop.py` — optional `escalation_agent` injection; tool-selection escalation after Jev's pick is authorised; completion-escalation branch between the evidence-gated completion checks and the loop guard; six escalation fields added to every `decision_history` entry.
+  - `agents/hybrid_agent.py` — constructs `EscalationAgent` from settings (`enable_escalation=True` default; `enable_escalation=False` reproduces pure Mode B); `mode` attribute ("B"/"C").
+  - `config/settings.py` — `tool_confidence_threshold` (0.60), `completion_ambiguity_lower` (0.50), `completion_ambiguity_upper` (0.70); all env-configurable, provisional pending calibration.
+  - `scripts/run_hybrid.py` — `--no-escalation` flag; experiment records now carry the real mode.
+  - `scripts/demo_mode_c.py` — mocked demonstration of the three required scenarios.
+  - `tests/test_escalation.py` — 25 tests covering tool-selection escalation (high/low confidence, authorised/unauthorised/malformed/failed Groq recommendations), completion escalation (clear/ambiguous, evidence gate, continuation, failure fallback), threshold validation, boundaries, Mode B regression, and Phase 5 safeguard preservation.
+- **Verified result: 77/77 tests pass** (52 pre-existing + 25 new; no existing test weakened).
+- **Safeguards preserved:** `allowed_tools` enforcement on the executed tool, `create_support_ticket` authorisation guard, evidence-based completion gate (Groq cannot confirm completion without required-tool evidence), safe fallback to Jev's authorised decision on any escalation failure.
+- **Demonstration scenarios verified** (mocked, deterministic): confident Jev runs without escalation; low-confidence selection escalates to Groq; ambiguous completion probability escalates to Groq. All visible in `decision_history` via `escalated` / `decision_type` / `groq_recommendation` / `final_decision` / `escalation_succeeded`.
+- Remaining: live Mode C smoke test (see HANDOFF.md; one controlled run with credentials), threshold calibration deferred to Phase 7 benchmarking.
+
+### Phase 6 live smoke test (2026-11-16)
+
+One controlled live Mode C run (`scripts/smoke_test_mode_c.py`, strict 2-Jev-call budget):
+
+- **Outcome: SUCCESS** (`success=true`, `termination_reason=jev_detected_completion`), 2 Jev calls, 1916 Groq tokens, 4.04 s.
+- Jev was fully confident both times (tool confidence 1.0; completion 0.03 → 0.89), so no escalation fired — the correct Mode C behaviour for confident decisions, and consistent with the Phase 5 baseline.
+- The escalation branches themselves are verified by the 25 mocked tests and `scripts/demo_mode_c.py`; no live call was spent forcing an artificial escalation.
 
 ## Phase 7 — Evaluation and Benchmarking Framework ❌
 

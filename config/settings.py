@@ -19,6 +19,11 @@ class Settings:
     typesafe_api_key: str
     jev_model: str
 
+    # Mode C escalation thresholds (provisional; require calibration).
+    tool_confidence_threshold: float
+    completion_ambiguity_lower: float
+    completion_ambiguity_upper: float
+
     @classmethod
     def from_env(cls):
 
@@ -53,6 +58,24 @@ class Settings:
 
             jev_model=os.getenv(
                 "JEV_MODEL", "jev-latest"
+            ),
+
+            tool_confidence_threshold=float(
+                os.getenv(
+                    "TOOL_CONFIDENCE_THRESHOLD", "0.60"
+                )
+            ),
+
+            completion_ambiguity_lower=float(
+                os.getenv(
+                    "COMPLETION_AMBIGUITY_LOWER", "0.50"
+                )
+            ),
+
+            completion_ambiguity_upper=float(
+                os.getenv(
+                    "COMPLETION_AMBIGUITY_UPPER", "0.70"
+                )
             )
         )
 

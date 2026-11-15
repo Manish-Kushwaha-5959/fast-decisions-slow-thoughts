@@ -18,13 +18,13 @@ RESULTS_CSV = EXPERIMENTS_DIR / "results.csv"
 LOGS_JSONL = EXPERIMENTS_DIR / "experiment_logs.jsonl"
 
 
-def record_experiment(result: dict) -> None:
+def record_experiment(result: dict, mode: str = "C") -> None:
     """Append one run record to the experiments structure."""
     timestamp = datetime.now(timezone.utc).isoformat()
 
     record = {
         "timestamp": timestamp,
-        "mode": "B",
+        "mode": mode,
         **result
     }
 
@@ -79,10 +79,17 @@ def main():
         default=5
     )
 
+    parser.add_argument(
+        "--no-escalation",
+        action="store_true",
+        help="Disable Mode C escalation (run as Mode B)."
+    )
+
     args = parser.parse_args()
 
     agent = HybridAgent(
-        max_iterations=args.max_iterations
+        max_iterations=args.max_iterations,
+        enable_escalation=not args.no_escalation
     )
 
     try:
@@ -108,7 +115,7 @@ def main():
         print("Success:", result.success)
         print("Termination:", result.termination_reason)
 
-        record_experiment(result.to_dict())
+        record_experiment(result.to_dict(), mode=agent.mode)
 
     finally:
         agent.close()

@@ -23,9 +23,9 @@ Ordered by severity. All line numbers refer to the working tree as of 2026-11-16
 - **Impact:** The research questions (token/latency/success comparison A vs B) still cannot be answered from one run. Historical "20/20" and "35/35" claims are not reproducible.
 - **Fix:** Phase 7 — implement task verification, metrics aggregation, cost model, and a task set.
 
-## 🟠 5. Phase 6/8 modules are empty placeholders
+## 🟠 5. Phase 6 implemented; Phase 8 module still an empty placeholder
 
-- `agents/escalation_agent.py` (0 bytes) — no Mode C / escalation logic.
+- `agents/escalation_agent.py` is now implemented (Mode C escalation, 25/25 tests pass).
 - `app.py` (0 bytes) — no Streamlit dashboard.
 - `evaluation/logger.py`, `evaluation/metrics.py`, `evaluation/task_verifier.py` (0 bytes) — no logging/metrics/verification.
 - `tests/test_jev_client.py` (0 bytes) — no Jev client unit tests.
@@ -61,6 +61,20 @@ Ordered by severity. All line numbers refer to the working tree as of 2026-11-16
 - `ControlLoop.run` evaluates Jev `max_iterations + 1` times (extra post-final-call evaluation is intentional and tested, but undocumented in the code comment).
 - `scripts/run_baseline.py` has the same pre-existing `ModuleNotFoundError: No module named 'agents'` defect that was fixed in `scripts/run_hybrid.py` (cwd not on `sys.path`); left untouched per the no-unrelated-refactor constraint of the Phase 5 live-validation task.
 - README status checklist is stale (all post-Phase-1 items unchecked despite phases 1–5 being complete).
+
+## 🟡 12. Mode C escalation thresholds are provisional, not calibrated
+
+- **Where:** `config/settings.py` (`tool_confidence_threshold` 0.60, `completion_ambiguity_lower` 0.50, `completion_ambiguity_upper` 0.70); consumed by `agents/escalation_agent.py`.
+- **What:** The defaults follow the Phase 6 specification's provisional values, not empirical measurement. Only one live Jev data point exists (confidence 1.0; completion 0.03 → 0.75), so the band may escalate too often or too rarely in practice.
+- **Impact:** Escalation frequency — and therefore token cost — cannot be judged until the thresholds are calibrated against recorded runs.
+- **Fix:** Phase 7 benchmarking should measure escalation rate, success, and cost across thresholds before these are treated as tuned values.
+
+## 🟡 13. Mode C escalation path has not yet fired against the live APIs
+
+- **Where:** `scripts/smoke_test_mode_c.py` (one controlled live run, 2026-11-16).
+- **What:** The live Mode C run succeeded end-to-end (`success=true`, `jev_detected_completion`, 2 Jev calls, 1916 Groq tokens, 4.04 s), but Jev was fully confident both times (tool confidence 1.0; completion 0.89), so the escalation branches were not exercised against real API responses.
+- **Impact:** Live Jev confidence/probability distributions may not cross the provisional thresholds, so a live run might never trigger escalation; the escalation code paths remain mocked-test-verified only.
+- **Fix:** when a benchmark task naturally produces a low-confidence or ambiguous Jev response (Phase 7), confirm the escalation path end-to-end; do not spend repeated live calls forcing it.
 
 ## 🔒 11. Secret hygiene
 
