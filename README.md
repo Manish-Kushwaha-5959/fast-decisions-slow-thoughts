@@ -56,7 +56,39 @@ decisions while maintaining reliable task execution.
 - [x] LLM + Jev hybrid agent
 - [x] Uncertainty-aware escalation
 - [x] Evaluation and benchmarking framework (Phase 7)
-- [ ] Evaluation dashboard (Phase 8)
+- [x] Evaluation dashboard (Phase 8)
+
+### Dashboard
+
+The Streamlit dashboard (`app.py`) is the main research demonstration.
+It reads the recorded benchmark data and lets an evaluator execute
+tasks through the real agents.
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Launch the dashboard
+streamlit run app.py
+```
+
+The dashboard opens in your browser at `http://localhost:8501`.
+
+**Sections:**
+
+| Section | What it shows |
+|---|---|
+| Overview | Project objective, System One/Two explanation, key benchmark metrics |
+| Agent Playground | Execute a task in Mode A/B/C (mocked by default; live API opt-in) |
+| Execution Monitor | Iteration history, Jev decisions, confidence/probabilities, escalations, tool results |
+| Benchmark Analytics | Verified success rates, latency, tokens, escalations from recorded data |
+| Mode Comparison | Side-by-side A/B/C metrics on the same task set |
+| Architecture | How the modes work and why evidence-based verification matters |
+
+The Agent Playground defaults to **mocked** execution (deterministic
+fake clients, offline, no cost). Live API execution is opt-in via the
+"Live API" radio button and requires valid `GROQ_API_KEY` /
+`TYPESAFE_API_KEY` in `.env`.
 
 ### Benchmark (mocked, offline)
 

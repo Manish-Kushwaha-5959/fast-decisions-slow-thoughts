@@ -16,15 +16,47 @@
 | `agents/control_loop.py` | Mode B/C execution loop — Jev controls selection/completion/loop/progress; Mode C escalates uncertain decisions to Groq. |
 | `agents/escalation_agent.py` | Mode C escalation reviewer — decides when Jev is uncertain and asks Groq for an advisory review. |
 | `agents/hybrid_agent.py` | Mode B/C orchestrator — planning → control loop → final response; constructs the EscalationAgent (Mode C) or runs pure Mode B. |
-| `evaluation/logger.py` | **EMPTY placeholder.** |
-| `evaluation/metrics.py` | **EMPTY placeholder.** |
-| `evaluation/task_verifier.py` | **EMPTY placeholder.** |
-| `agents/escalation_agent.py` | **EMPTY placeholder (Phase 6).** |
-| `app.py` | **EMPTY placeholder (Phase 8 dashboard).** |
+| `evaluation/logger.py` | Append-only CSV + JSONL experiment logger; every record carries `execution_type` (mocked/live). |
+| `evaluation/metrics.py` | Provider-distinguishable metric extraction (`extract_run_metrics`) and per-mode aggregation (`summarize_runs`); missing values stay `None`, never invented. |
+| `evaluation/task_verifier.py` | Independent outcome verification (`TaskVerifier.verify`); never trusts the agent's self-reported `success`. Also `load_tasks`/`validate_tasks`. |
+| `app.py` | Phase 8 Streamlit dashboard — Overview, Agent Playground, Execution Monitor, Benchmark Analytics, Mode Comparison, Architecture. Reads recorded benchmark data; reuses agent interfaces for execution. |
 | `scripts/run_baseline.py` | CLI entry for Mode A. |
 | `scripts/run_hybrid.py` | CLI entry for Mode B. |
-| `scripts/run_benchmark.py` | **EMPTY placeholder (Phase 7).** |
-| `data/tasks.json` | **EMPTY placeholder (benchmark tasks).** |
+| `scripts/run_benchmark.py` | Phase 7 benchmark runner (`BenchmarkRunner`, `FakeLLMClient`/`FakeJevClient`, threshold analysis, `--live` safety gate). |
+| `data/tasks.json` | 10 benchmark tasks across 4 categories with `expected_tools` + `verification` blocks. |
+
+## 1a. Phase 8 Dashboard Architecture
+
+`app.py` is the Streamlit research-demonstration interface. It is a
+**presentation layer only**: it does not reimplement agent or
+evaluation logic.
+
+- **Data loading** — `load_benchmark_data()` reads
+  `experiments/benchmark_results.csv` (flat metrics) and joins the
+  matching JSONL records (`verification`, `raw_execution`) by
+  `run_id`. If the main files are empty it falls back to
+  `experiments/demo_mocked/`.
+- **Agent execution** — the Agent Playground reuses the benchmark's
+  mocked path (`FakeLLMClient`/`FakeJevClient` + scripted responses
+  from `scripts/run_benchmark.py`) by default, and the real
+  `GroqLLMClient`/`JevClient` only when the user explicitly selects
+  "Live API". No execution happens on page load.
+- **Aggregation** — success-rate/latency/token/escalation helpers
+  (`get_mode_success_rates`, `get_latency_data`, `get_token_data`,
+  `get_escalation_data`) operate on the loaded records; they never
+  fabricate a missing metric (an absent value renders as "N/A" or is
+  excluded from the chart).
+- **Safety** — mocked and live runs are distinguished by the
+  `execution_type` field and never mixed in one comparison; live
+  execution is opt-in per click; API keys are never displayed.
+
+```
+app.py (presentation)
+  ├── load_benchmark_data() ──► experiments/benchmark_results.{csv,jsonl}
+  ├── _run_mocked_agent()  ──► scripts/run_benchmark.py (FakeLLMClient/FakeJevClient)
+  ├── _run_live_agent()    ──► agents/{baseline_agent,hybrid_agent}.py ──► models/{llm,jev}_client.py
+  └── render_*()           ──► streamlit UI sections (Overview … Architecture)
+```
 
 ## 2. Data Structures
 

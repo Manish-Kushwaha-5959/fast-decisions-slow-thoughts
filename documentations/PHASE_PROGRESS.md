@@ -13,7 +13,7 @@ Legend: ✅ Complete · ⚠️ Implemented but broken/unvalidated · ❌ Not sta
 | 5 | Hybrid LLM + Jev Agent Integration | ✅ Complete (authorization enforced; evidence-gated completion wired; 32/32 hybrid tests pass) |
 | 6 | Uncertainty Detection and Escalation | ✅ Complete (Mode C escalation implemented; 25/25 escalation tests pass) |
 | 7 | Evaluation and Benchmarking Framework | ✅ Complete (67/67 Phase 7 tests pass; verifier independent of agent self-report; benchmark runs all three modes offline) |
-| 8 | Streamlit Dashboard and Final Validation | ❌ Not started (`app.py` is 0 bytes) |
+| 8 | Streamlit Dashboard and Final Validation | ✅ Complete (`app.py` dashboard; 144/144 tests) |
 
 **Working tree state:** 4 files modified but uncommitted (`agents/control_loop.py`, `agents/hybrid_agent.py`, `agents/prompts.py`, `tests/test_hybrid_agent.py`), plus 2 stray `.bak` files. Commit `96dd81a` is "phase 5 almost complete"; the uncommitted diff is the actual Phase 5 work-in-progress.
 
@@ -131,10 +131,20 @@ One controlled live Mode C run (`scripts/smoke_test_mode_c.py`, strict 2-Jev-cal
 - **Live safety:** `--live` without budget or confirmation exits 1 before constructing any API client; mocked mode never imports the live clients.
 - Remaining: no live benchmark run has been executed (opt-in only); escalation branches not exercised by the mocked dataset (all Jev confidences are 0.95) — calibration data gap, documented by the threshold analysis.
 
-## Phase 8 — Streamlit Dashboard and Final Validation ❌
+## Phase 8 — Streamlit Dashboard and Final Validation ✅
 
-- `app.py` is **0 bytes**. `streamlit`/`pandas`/`numpy` are in `requirements.txt` but unused.
-- No dashboard, no cross-mode comparison UI. Not started.
+- **Objective:** a polished, functional Streamlit dashboard that demonstrates the completed agent architecture and evaluation framework using the actual project modules and recorded experiment data.
+- **Implemented:** `app.py` with six sidebar-navigated sections:
+  - **Overview** — project title, research objective, System One (Jev) vs System Two (Groq) explanation, available modes, key benchmark metrics from recorded data.
+  - **Agent Playground** — task text area, Mode A/B/C selector, mocked-vs-live execution-type selector, max-iterations input, Execute button (execution only on click). Shows final response, execution success, verification outcome, latency, token usage (Groq/Jev separated), iterations, tool calls, and errors. Defaults to the benchmark's deterministic mocked clients (`FakeLLMClient`/`FakeJevClient` via `scripts/run_benchmark.py` helpers); live API is opt-in.
+  - **Execution Monitor** — iteration history, Jev tool-selection decisions, confidence/probability values, Groq escalation events, tool selections + arguments, tool execution results, evidence/completion decisions, termination reason. Distinguishes Jev decisions vs Groq recommendations vs final controller decisions. No secrets or env values are displayed.
+  - **Benchmark Analytics** — reads `experiments/benchmark_results.csv` + `.jsonl` (falls back to `experiments/demo_mocked/`); verified vs agent-reported success rate, average latency, average total tokens, Groq/Jev token usage separately, tool calls, iterations, escalation frequency, verification outcomes. Plotly charts + mode/execution-type filters. Mocked vs live runs are distinguished and never mixed.
+  - **Mode Comparison** — side-by-side A/B/C comparison on the same task set (verified success rate, token consumption, latency, tool calls, escalation frequency, verification failures) with bar charts.
+  - **Architecture** — System One/Two explanation, Mode A/B/C behaviour, controller final authority, why evidence-based verification matters.
+- **Data integrity:** uses actual recorded experiment rows; missing metrics render as "N/A" or are excluded rather than invented; no fabricated benchmark results; no statistical-significance claims; historical records unchanged (append-only logger untouched).
+- **Safety:** no live API call on load; execution requires an explicit button click; live mode is opt-in via a radio button; errors are surfaced without crashing the dashboard; API keys are never displayed; benchmark safety controls unchanged.
+- **Verified result:** dashboard starts (`streamlit run app.py`), all six sections render without exceptions, mocked playground execution succeeds for Modes A/B/C, 144/144 tests still pass.
+- **Remaining:** live benchmark rows are still opt-in only (no live campaign has been recorded); Mode C escalation branches remain unexercised by the mocked dataset (all Jev confidences 0.95 — the threshold-analysis data gap is unchanged).
 
 ---
 

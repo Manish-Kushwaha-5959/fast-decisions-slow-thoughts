@@ -23,11 +23,11 @@ Ordered by severity. All line numbers refer to the working tree as of 2026-11-16
 - The research questions (token/latency/success comparison A vs B vs C) are now answerable offline via the mocked benchmark; see `PHASE_PROGRESS.md`.
 - Historical "20/20" and "35/35" claims remain non-reproducible (pre-Phase-1 history); not re-litigated here.
 
-## 🟠 5. Phase 7 done; Phase 8 module still an empty placeholder
+## 🟠 5. Phase 7 done; Phase 8 dashboard implemented but has no dedicated tests
 
 - `agents/escalation_agent.py` is implemented (Mode C escalation, 25/25 tests pass).
-- `app.py` (0 bytes) — no Streamlit dashboard.
-- `evaluation/*.py` and `scripts/run_benchmark.py` are now implemented (Phase 7).
+- `app.py` (Phase 8 Streamlit dashboard) is implemented and manually validated (all six sections render; mocked playground execution succeeds for Modes A/B/C). It is **not** covered by the pytest suite — the 144 tests cover Phases 1–7 modules only.
+- `evaluation/*.py` and `scripts/run_benchmark.py` are implemented (Phase 7).
 - `tests/test_jev_client.py` (0 bytes) — no Jev client unit tests.
 
 ## 🟡 6. Loop-detection heuristic is strict and partially live-observed
