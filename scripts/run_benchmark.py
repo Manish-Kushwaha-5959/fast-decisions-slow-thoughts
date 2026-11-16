@@ -36,6 +36,7 @@ import sys
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -355,7 +356,7 @@ class BenchmarkRunner:
 
         return execution.to_dict()
 
-    def run_task(self, task, mode, repetition=1):
+    def run_task(self, task, mode, repetition=1, defer_logging=False):
         """
         Execute + independently verify one (task, mode, repetition).
 
@@ -409,17 +410,17 @@ class BenchmarkRunner:
         # Merge economic metrics into the metrics dict for logging
         metrics.update(economic_metrics.to_dict())
 
-        self.logger.log(
-            mode=mode,
-            task_id=task["id"],
-            metrics=metrics,
-            verification=verification.to_dict(),
-            run_id=run_id,
-            raw_execution=execution,
-            repetition=repetition,
-            execution_type=self.execution_type,
-            error=error
-        )
+        if not defer_logging:
+            self._log_run(
+                mode=mode,
+                task_id=task["id"],
+                metrics=metrics,
+                verification=verification,
+                run_id=run_id,
+                raw_execution=execution,
+                repetition=repetition,
+                error=error
+            )
 
         return {
             "run_id": run_id,
@@ -428,24 +429,96 @@ class BenchmarkRunner:
             "execution": execution,
             "metrics": metrics,
             "verification": verification,
-            "error": error
+            "error": error,
+            "repetition": repetition,
+            "execution_type": self.execution_type,
         }
+
+    def _log_run(
+        self,
+        mode: str,
+        task_id: str,
+        metrics: dict,
+        verification,
+        run_id: str,
+        raw_execution: dict,
+        repetition: int,
+        error: Optional[str] = None
+    ) -> dict:
+        """Append one run record through the experiment logger."""
+
+        return self.logger.log(
+            mode=mode,
+            task_id=task_id,
+            metrics=metrics,
+            verification=verification.to_dict(),
+            run_id=run_id,
+            raw_execution=raw_execution,
+            repetition=repetition,
+            execution_type=self.execution_type,
+            error=error
+        )
 
     def run_benchmark(self, modes, tasks=None, repetitions=1):
         """
         Execute every (task, mode) pair ``repetitions`` times.
 
         Returns ``{mode: [run_record, ...]}``.
+
+        Runs of one mode are executed first; the per-mode cost summary
+        is then derived from those runs and stamped onto each record
+        before it is logged, so every row carries the aggregate fields
+        (cost per successful/failed task, provider contribution shares)
+        without rewriting history and without logging any run twice.
         """
 
         results = {mode: [] for mode in modes}
         task_list = tasks if tasks is not None else self.tasks
 
         for mode in modes:
+            mode_runs: list[dict] = []
             for task in task_list:
                 for repetition in range(1, repetitions + 1):
-                    run = self.run_task(task, mode, repetition)
+                    run = self.run_task(
+                        task, mode, repetition, defer_logging=True
+                    )
+                    mode_runs.append(run)
                     results[mode].append(run)
+
+            summary = summarize_runs(
+                [
+                    {
+                        "outcome": run["verification"].outcome,
+                        "metrics": run["metrics"]
+                    }
+                    for run in mode_runs
+                ],
+                mode=mode
+            )
+
+            for run in mode_runs:
+                run["metrics"]["cost_per_successful_task"] = (
+                    summary.cost_per_successful_task
+                )
+                run["metrics"]["cost_per_failed_task"] = (
+                    summary.cost_per_failed_task
+                )
+                run["metrics"]["groq_cost_contribution"] = (
+                    summary.groq_cost_contribution
+                )
+                run["metrics"]["jev_cost_contribution"] = (
+                    summary.jev_cost_contribution
+                )
+                self._log_run(
+                    mode=mode,
+                    task_id=run["task_id"],
+                    metrics=run["metrics"],
+                    verification=run["verification"],
+                    run_id=run["run_id"],
+                    raw_execution=run["execution"],
+                    repetition=run.get("repetition", 1),
+                    error=run.get("error")
+                )
 
         return results
 
@@ -772,7 +845,7 @@ def main():
                 task_id=run["task_id"],
                 mode=mode,
                 execution_metrics=run["metrics"],
-                execution_type=run.get("execution_type", "mocked")
+                execution_type=run.get("execution_type") or "mocked"
             )
             for run in results[mode]
         ]

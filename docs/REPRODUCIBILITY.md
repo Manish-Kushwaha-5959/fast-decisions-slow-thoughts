@@ -104,9 +104,11 @@ Key points for reproduction:
 - Each record carries `pricing_version` and `pricing_date`. Changing
   pricing creates a new version; historical rows are never rewritten.
 - `groq_actual_cost` / `jev_actual_cost` are the amounts actually
-  charged, where known. Groq free-tier calls are `$0`. Jev is not
-  assumed free merely because Groq is; its actual cost must come from
-  the Jev billing route.
+  charged, where known. They are only written from a provider billing
+  source; a free-tier label or a token count is not a billing
+  measurement, so an unmeasured charge stays `None` (absent) rather
+  than being written as `$0`. Jev's actual cost must come from its
+  billing route.
 - `groq_estimated_cost` / `jev_estimated_cost` apply reference paid
   pricing to recorded tokens. They are estimates, not billing.
 - Historical rows (Phase 5–7) have no cost fields; they stay missing

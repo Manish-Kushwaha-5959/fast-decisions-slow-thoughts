@@ -38,10 +38,20 @@ CSV_FIELDS = [
     "escalation_count", "tool_selection_escalations",
     "completion_escalations", "escalation_succeeded_count",
     "termination_reason", "error",
-    # Economic cost fields (Phase 11)
+    # Economic cost fields (Phase 11). Estimated equivalent cost is
+    # always derived from recorded tokens; the *_actual_cost fields are
+    # None unless a provider billing source supplied a value, so an
+    # unmeasured charge is absent in CSV rather than a fabricated 0.
+    # Groq token usage is stored under llm_* (the schema's
+    # provider-distinguishable names); there is no separate groq_*
+    # token bucket to duplicate.
     "groq_estimated_cost", "jev_estimated_cost", "total_estimated_cost",
     "groq_actual_cost", "jev_actual_cost", "total_actual_cost",
-    "usage_measurement_method", "pricing_version", "pricing_date"
+    "usage_measurement_method", "pricing_version", "pricing_date",
+    # Cost summary (per-mode aggregates carried alongside the run row
+    # so each record is self-describing; computed by the runner).
+    "cost_per_successful_task", "cost_per_failed_task",
+    "groq_cost_contribution", "jev_cost_contribution"
 ]
 
 
@@ -164,7 +174,9 @@ class ExperimentLogger:
             ),
             "termination_reason": metrics.get("termination_reason"),
             "error": error,
-            # Phase 11: economic cost fields
+            # Phase 11: economic cost fields. Estimated cost and the
+            # usage method are always present; actual costs stay absent
+            # when unmeasured rather than being written as $0.
             "groq_estimated_cost": metrics.get("groq_estimated_cost"),
             "jev_estimated_cost": metrics.get("jev_estimated_cost"),
             "total_estimated_cost": metrics.get("total_estimated_cost"),
@@ -173,7 +185,15 @@ class ExperimentLogger:
             "total_actual_cost": metrics.get("total_actual_cost"),
             "usage_measurement_method": metrics.get("usage_measurement_method"),
             "pricing_version": metrics.get("pricing_version"),
-            "pricing_date": metrics.get("pricing_date")
+            "pricing_date": metrics.get("pricing_date"),
+            # Per-mode cost summary (None when the aggregate is unknown,
+            # e.g. a mode with no verified successes/failures yet).
+            "cost_per_successful_task": metrics.get(
+                "cost_per_successful_task"
+            ),
+            "cost_per_failed_task": metrics.get("cost_per_failed_task"),
+            "groq_cost_contribution": metrics.get("groq_cost_contribution"),
+            "jev_cost_contribution": metrics.get("jev_cost_contribution")
         }
 
         record = dict(row)
@@ -184,6 +204,40 @@ class ExperimentLogger:
         self._append_jsonl(record)
 
         return record
+
+    def log_live_run(
+        self,
+        mode: str,
+        task_id: str,
+        metrics: dict,
+        verification: dict,
+        run_id: str,
+        raw_execution: Optional[dict] = None,
+        repetition: int = 1,
+        error: Optional[str] = None
+    ) -> dict:
+        """Append one LIVE run record (the canonical live destination).
+
+        Wraps :meth:`log` with ``execution_type="live"`` so single-task
+        live scripts record to the same append-only benchmark files
+        (``benchmark_results.csv`` / ``.jsonl``) as the campaign runner.
+        Live records therefore carry ``execution_type == "live"``, the
+        provider-reported usage and the Phase 11 cost fields, and are
+        never mixed into the legacy Phase 5/6 files
+        (``results.csv`` / ``experiment_logs.jsonl``).
+        """
+
+        return self.log(
+            mode=mode,
+            task_id=task_id,
+            metrics=metrics,
+            verification=verification,
+            run_id=run_id,
+            raw_execution=raw_execution,
+            repetition=repetition,
+            execution_type="live",
+            error=error
+        )
 
     def count_records(self) -> int:
         """Return the number of JSONL records written so far."""

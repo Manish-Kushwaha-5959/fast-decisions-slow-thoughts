@@ -232,14 +232,19 @@ Recorded outputs currently in the repository:
 - **No unit coverage for the API clients:** `GroqLLMClient` and
   `JevClient` are exercised only by live scripts that cost money;
   `tests/test_jev_client.py` is empty.
-- **Live escalation unexercised:** the recorded live Mode C run succeeded
-  end-to-end but Jev was fully confident both times, so the escalation
-  branches have not fired against real API responses.
+- **Live escalation unexercised:** no live Mode C run exists — the only
+  recorded live run is Mode B (`experiments/results.csv`), where Jev was
+  fully confident both times, so the escalation branches have not fired
+  against real API responses. The escalation branch itself is validated
+  only by a deterministic mocked unit test with controlled confidence
+  values (`tests/test_logging_economic.py`), which is not live evidence.
 - **Loop-detection heuristic strictness:** termination requires
   `loop_probability >= 0.70` AND ≥ 2 tool calls AND normalised progress
   ≤ 0.20; the 0–5 progress scale is assumed, not verified.
-- **Actual expenditure not available in mocked runs:** `groq_actual_cost`
-  and `jev_actual_cost` are `$0` for mocked rows by construction. Live
+- **Actual expenditure is never fabricated:** `groq_actual_cost` and
+  `jev_actual_cost` stay `None` (absent) unless a provider billing source
+  supplies a value. A free-tier label or a token count is not a billing
+  measurement, so unmeasured expenditure is not written as `$0`. Live
   runs record actual billing only where the provider exposes it; otherwise
   the field stays missing rather than being estimated.
 - **Jev pricing route must be verified:** the Jev input price assumes the

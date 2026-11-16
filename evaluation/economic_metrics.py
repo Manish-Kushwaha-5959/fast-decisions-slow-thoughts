@@ -9,7 +9,10 @@ Key design decisions:
 - Only cost fields and metadata are added to avoid overwriting None values
   (e.g., Mode A has no Jev usage, so jev_* tokens stay None).
 - Estimated cost applies reference pricing to recorded tokens.
-- Actual expenditure is tracked separately (Groq free tier = $0).
+- Actual expenditure is only ever recorded from a provider billing source.
+  A free-tier label does NOT turn an unmeasured charge into $0: when no
+  billing figure exists the actual-cost fields stay None. Fabricated
+  zeros were the Phase 12 defect this version removes.
 """
 
 from typing import Optional, Literal
@@ -36,11 +39,11 @@ class TaskEconomicMetrics:
     jev_total_tokens: int
     # Cost calculations (estimated = reference pricing; actual = billed)
     groq_estimated_cost: float = 0.0
-    groq_actual_cost: float = 0.0
+    groq_actual_cost: Optional[float] = None
     jev_estimated_cost: float = 0.0
-    jev_actual_cost: float = 0.0
+    jev_actual_cost: Optional[float] = None
     total_estimated_cost: float = 0.0
-    total_actual_cost: float = 0.0
+    total_actual_cost: Optional[float] = None
     # Metadata
     usage_measurement_method: str = "actual"
     pricing_version: str = PRICING_VERSION
@@ -63,12 +66,18 @@ class TaskEconomicMetrics:
         self.total_estimated_cost = (
             self.groq_estimated_cost + self.jev_estimated_cost
         )
-        # Actual expenditure: Groq free tier = $0; Jev typically free.
-        # These are placeholder values; real billing data would come from
-        # provider dashboards, not token counts.
-        self.groq_actual_cost = 0.0 if self.free_tier_used else self.groq_estimated_cost
-        self.jev_actual_cost = 0.0
-        self.total_actual_cost = self.groq_actual_cost + self.jev_actual_cost
+        # Actual expenditure is never inferred. A free-tier label or a
+        # token count is not a billing measurement, so actual costs stay
+        # None until a provider billing source supplies a value.
+        self.total_actual_cost = self._sum_actual_costs()
+
+    def _sum_actual_costs(self) -> Optional[float]:
+        """Sum known actual costs; None when none were measured."""
+        known = [
+            value for value in (self.groq_actual_cost, self.jev_actual_cost)
+            if value is not None
+        ]
+        return sum(known) if known else None
 
     def _calculate_groq_estimated_cost(self) -> float:
         pricing = get_pricing_config().get_pricing_for_provider("groq")
@@ -97,8 +106,26 @@ class TaskEconomicMetrics:
             self.groq_estimated_cost + self.jev_estimated_cost
         )
 
+    def set_groq_actual_cost(self, amount: Optional[float]) -> None:
+        """Record Groq actual expenditure from a billing source.
+
+        ``None`` means "no billing figure available" and leaves the field
+        unmeasured rather than inventing $0.
+        """
+        self.groq_actual_cost = amount
+        self.total_actual_cost = self._sum_actual_costs()
+
+    def set_jev_actual_cost(self, amount: Optional[float]) -> None:
+        """Record Jev actual expenditure from its billing route."""
+        self.jev_actual_cost = amount
+        self.total_actual_cost = self._sum_actual_costs()
+
     def to_dict(self) -> dict:
-        """Return cost fields only (no token fields to avoid overwriting None)."""
+        """Return cost fields only (no token fields to avoid overwriting None).
+
+        Unmeasured actual expenditure serialises to ``None`` (absent in
+        CSV) rather than a fabricated zero.
+        """
         return {
             "groq_estimated_cost": self.groq_estimated_cost,
             "jev_estimated_cost": self.jev_estimated_cost,
@@ -119,11 +146,11 @@ class EconomicMetricsSummary:
     mode: str
     run_count: int = 0
     total_groq_estimated_cost: float = 0.0
-    total_groq_actual_cost: float = 0.0
+    total_groq_actual_cost: Optional[float] = None
     total_jev_estimated_cost: float = 0.0
-    total_jev_actual_cost: float = 0.0
+    total_jev_actual_cost: Optional[float] = None
     total_estimated_cost: float = 0.0
-    total_actual_cost: float = 0.0
+    total_actual_cost: Optional[float] = None
     total_groq_input_tokens: int = 0
     total_groq_output_tokens: int = 0
     total_groq_tokens: int = 0
@@ -139,14 +166,31 @@ class EconomicMetricsSummary:
     jev_cost_contribution: Optional[float] = None
 
     def update_with_task_metrics(self, task_metrics: TaskEconomicMetrics) -> None:
-        """Aggregate one task's economic metrics into this summary."""
+        """Aggregate one task's economic metrics into this summary.
+
+        Actual-expenditure sums stay ``None`` until at least one run
+        contributes a *measured* actual figure; unmeasured values are
+        never treated as $0.
+        """
+
+        def _add_actual(current: Optional[float], value: Optional[float]) -> Optional[float]:
+            if value is None:
+                return current
+            return (current or 0.0) + value
+
         self.run_count += 1
         self.total_groq_estimated_cost += task_metrics.groq_estimated_cost
-        self.total_groq_actual_cost += task_metrics.groq_actual_cost
+        self.total_groq_actual_cost = _add_actual(
+            self.total_groq_actual_cost, task_metrics.groq_actual_cost
+        )
         self.total_jev_estimated_cost += task_metrics.jev_estimated_cost
-        self.total_jev_actual_cost += task_metrics.jev_actual_cost
+        self.total_jev_actual_cost = _add_actual(
+            self.total_jev_actual_cost, task_metrics.jev_actual_cost
+        )
         self.total_estimated_cost += task_metrics.total_estimated_cost
-        self.total_actual_cost += task_metrics.total_actual_cost
+        self.total_actual_cost = _add_actual(
+            self.total_actual_cost, task_metrics.total_actual_cost
+        )
         self.total_groq_input_tokens += task_metrics.groq_input_tokens
         self.total_groq_output_tokens += task_metrics.groq_output_tokens
         self.total_groq_tokens += task_metrics.groq_total_tokens
@@ -234,12 +278,15 @@ class EconomicMetricsCalculator:
             groq_usage=True,
             jev_usage=jev_usage,
             has_live_api_calls=(execution_type == "live"),
-            free_tier_used=True,  # Groq free tier assumed for mocked runs
+            # Recorded as metadata only; the free-tier label never
+            # fabricates an actual-cost figure (actual stays None until
+            # a billing source supplies one).
+            free_tier_used=True,
             # Label how the usage was obtained: live runs carry
             # provider-reported usage; mocked runs carry synthetic
             # client usage (never presented as provider data).
             usage_measurement_method=(
-                "actual" if execution_type == "live" else "mocked"
+                "provider_reported" if execution_type == "live" else "mocked"
             ),
             pricing_version=PRICING_VERSION,
             escalation_count=escalation_count

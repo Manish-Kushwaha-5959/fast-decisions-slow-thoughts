@@ -389,7 +389,12 @@ class TestTaskEconomicMetrics:
         assert task.total_estimated_cost == pytest.approx(groq_cost + jev_cost)
 
     def test_free_tier_actual_expenditure(self):
-        """Free-tier Groq calls have actual expenditure of $0."""
+        """A free-tier label is not a billing measurement.
+
+        Actual expenditure stays None until a provider billing source
+        supplies a value; it is never fabricated as $0 from the
+        free_tier_used flag (Phase 12 defect corrected).
+        """
 
         task = TaskEconomicMetrics(
             task_id="task_free",
@@ -403,8 +408,16 @@ class TestTaskEconomicMetrics:
             free_tier_used=True
         )
 
+        # No billing figure was recorded, so actual is unavailable.
+        assert task.groq_actual_cost is None
+        assert task.total_actual_cost is None
+        # Estimated still uses reference pricing (not zero).
+        assert task.groq_estimated_cost > 0.0
+
+        # When a billing source does supply a figure, it is recorded.
+        task.set_groq_actual_cost(0.0)
         assert task.groq_actual_cost == 0.0
-        assert task.groq_estimated_cost > 0.0  # estimated is not zero
+        assert task.total_actual_cost == 0.0
 
     def test_estimated_vs_actual_separation(self):
         """Estimated and actual costs are separate fields."""
@@ -425,12 +438,16 @@ class TestTaskEconomicMetrics:
         expected_estimated = (1000 / 1e6) * 0.15 + (500 / 1e6) * 0.60
         assert task.groq_estimated_cost == pytest.approx(expected_estimated)
 
-        # Actual is $0 (free tier)
-        assert task.groq_actual_cost == 0.0
+        # Actual is unavailable, not assumed $0 (no billing source).
+        assert task.groq_actual_cost is None
 
         # Totals reflect the separation
         assert task.total_estimated_cost == pytest.approx(expected_estimated)
-        assert task.total_actual_cost == 0.0
+        assert task.total_actual_cost is None
+
+        # A measured actual figure is summed, not invented.
+        task.set_groq_actual_cost(0.01)
+        assert task.total_actual_cost == pytest.approx(0.01)
 
     def test_to_dict_excludes_token_fields(self):
         """to_dict returns cost fields only, not token fields."""
