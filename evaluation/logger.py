@@ -37,7 +37,11 @@ CSV_FIELDS = [
     "tool_latency_seconds", "total_latency_seconds",
     "escalation_count", "tool_selection_escalations",
     "completion_escalations", "escalation_succeeded_count",
-    "termination_reason", "error"
+    "termination_reason", "error",
+    # Economic cost fields (Phase 11)
+    "groq_estimated_cost", "jev_estimated_cost", "total_estimated_cost",
+    "groq_actual_cost", "jev_actual_cost", "total_actual_cost",
+    "usage_measurement_method", "pricing_version", "pricing_date"
 ]
 
 
@@ -159,7 +163,17 @@ class ExperimentLogger:
                 "escalation_succeeded_count"
             ),
             "termination_reason": metrics.get("termination_reason"),
-            "error": error
+            "error": error,
+            # Phase 11: economic cost fields
+            "groq_estimated_cost": metrics.get("groq_estimated_cost"),
+            "jev_estimated_cost": metrics.get("jev_estimated_cost"),
+            "total_estimated_cost": metrics.get("total_estimated_cost"),
+            "groq_actual_cost": metrics.get("groq_actual_cost"),
+            "jev_actual_cost": metrics.get("jev_actual_cost"),
+            "total_actual_cost": metrics.get("total_actual_cost"),
+            "usage_measurement_method": metrics.get("usage_measurement_method"),
+            "pricing_version": metrics.get("pricing_version"),
+            "pricing_date": metrics.get("pricing_date")
         }
 
         record = dict(row)

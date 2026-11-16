@@ -16,6 +16,7 @@ Design rules:
 """
 
 from dataclasses import dataclass
+from statistics import median
 from typing import Any, Optional
 
 
@@ -79,6 +80,22 @@ class MetricSummary:
     # Per-mode success rate against independent verification.
     verified_success_rate: Optional[float] = None
     agent_reported_success_rate: Optional[float] = None
+    # Economic cost fields (Phase 11). None when no run in the mode
+    # carries cost data (e.g. historical rows predating Phase 11).
+    groq_estimated_cost: Optional[float] = None
+    jev_estimated_cost: Optional[float] = None
+    total_estimated_cost: Optional[float] = None
+    groq_actual_cost: Optional[float] = None
+    jev_actual_cost: Optional[float] = None
+    total_actual_cost: Optional[float] = None
+    avg_cost_per_task: Optional[float] = None
+    median_cost_per_task: Optional[float] = None
+    cost_by_mode: Optional[dict] = None
+    groq_cost_contribution: Optional[float] = None
+    jev_cost_contribution: Optional[float] = None
+    total_runs_in_mode: Optional[int] = None
+    cost_per_successful_task: Optional[float] = None
+    cost_per_failed_task: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -114,7 +131,22 @@ class MetricSummary:
             "escalation_frequency": self.escalation_frequency,
             "escalation_succeeded_count": (
                 self.escalation_succeeded_count
-            )
+            ),
+            # Phase 11 economic cost fields
+            "groq_estimated_cost": self.groq_estimated_cost,
+            "jev_estimated_cost": self.jev_estimated_cost,
+            "total_estimated_cost": self.total_estimated_cost,
+            "groq_actual_cost": self.groq_actual_cost,
+            "jev_actual_cost": self.jev_actual_cost,
+            "total_actual_cost": self.total_actual_cost,
+            "avg_cost_per_task": self.avg_cost_per_task,
+            "median_cost_per_task": self.median_cost_per_task,
+            "cost_by_mode": self.cost_by_mode,
+            "groq_cost_contribution": self.groq_cost_contribution,
+            "jev_cost_contribution": self.jev_cost_contribution,
+            "total_runs_in_mode": self.total_runs_in_mode,
+            "cost_per_successful_task": self.cost_per_successful_task,
+            "cost_per_failed_task": self.cost_per_failed_task
         }
 
 
@@ -316,6 +348,59 @@ def summarize_runs(runs: list[dict], mode: str) -> MetricSummary:
     summary.total_latency_seconds = _sum(latencies)
     summary.mean_latency_seconds = _mean(latencies)
     summary.mean_iterations = _mean(iterations)
+
+    # Phase 11: economic cost aggregation. Costs are summed only across
+    # runs that actually carry cost data; historical rows without the
+    # fields keep every cost aggregate as None (never invented).
+    def _float_total(key: str) -> Optional[float]:
+        values = [
+            run.get("metrics", {}).get(key)
+            for run in runs
+        ]
+        values = [value for value in values if value is not None]
+        return float(sum(values)) if values else None
+
+    summary.groq_estimated_cost = _float_total("groq_estimated_cost")
+    summary.jev_estimated_cost = _float_total("jev_estimated_cost")
+    summary.total_estimated_cost = _float_total("total_estimated_cost")
+    summary.groq_actual_cost = _float_total("groq_actual_cost")
+    summary.jev_actual_cost = _float_total("jev_actual_cost")
+    summary.total_actual_cost = _float_total("total_actual_cost")
+    summary.total_runs_in_mode = len(runs)
+
+    if summary.total_estimated_cost is not None and summary.run_count:
+        summary.avg_cost_per_task = (
+            summary.total_estimated_cost / summary.run_count
+        )
+
+    individual_costs = [
+        run.get("metrics", {}).get("total_estimated_cost")
+        for run in runs
+    ]
+    individual_costs = [c for c in individual_costs if c is not None]
+    if individual_costs:
+        summary.median_cost_per_task = median(individual_costs)
+
+    if summary.total_estimated_cost:
+        summary.cost_by_mode = {mode: summary.total_estimated_cost}
+        if summary.groq_estimated_cost is not None:
+            summary.groq_cost_contribution = (
+                summary.groq_estimated_cost / summary.total_estimated_cost
+            )
+        if summary.jev_estimated_cost is not None:
+            summary.jev_cost_contribution = (
+                summary.jev_estimated_cost / summary.total_estimated_cost
+            )
+
+    # Cost per successful / failed task, where meaningful.
+    if summary.verified_successes and summary.total_estimated_cost is not None:
+        summary.cost_per_successful_task = (
+            summary.total_estimated_cost / summary.verified_successes
+        )
+    if summary.verified_failures and summary.total_estimated_cost is not None:
+        summary.cost_per_failed_task = (
+            summary.total_estimated_cost / summary.verified_failures
+        )
 
     # Escalation frequency: escalation events per control-loop
     # iteration, aggregated across all runs of the mode.

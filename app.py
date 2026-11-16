@@ -265,6 +265,73 @@ def get_escalation_data(records):
     return escalations
 
 
+def _safe_float_or_none(value):
+    """Parse a CSV value to float, returning None when missing/invalid."""
+
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return None
+
+
+def get_cost_data(records):
+    """Extract economic cost data per mode (Phase 11).
+
+    Cost fields are present only in rows written by Phase 11+ code.
+    Historical rows carry no cost columns, so every figure stays
+    missing (None) rather than being fabricated as zero.
+    """
+
+    costs = {
+        "A": {"runs": 0, "groq_estimated": 0.0, "jev_estimated": 0.0,
+              "total_estimated": 0.0, "groq_actual": 0.0, "jev_actual": 0.0,
+              "total_actual": 0.0, "pricing_version": None, "has_cost_data": False},
+        "B": {"runs": 0, "groq_estimated": 0.0, "jev_estimated": 0.0,
+              "total_estimated": 0.0, "groq_actual": 0.0, "jev_actual": 0.0,
+              "total_actual": 0.0, "pricing_version": None, "has_cost_data": False},
+        "C": {"runs": 0, "groq_estimated": 0.0, "jev_estimated": 0.0,
+              "total_estimated": 0.0, "groq_actual": 0.0, "jev_actual": 0.0,
+              "total_actual": 0.0, "pricing_version": None, "has_cost_data": False},
+    }
+
+    for r in records:
+        m = r.get("mode", "")
+        if m not in costs:
+            continue
+
+        costs[m]["runs"] += 1
+
+        estimated = _safe_float_or_none(r.get("total_estimated_cost"))
+        if estimated is not None:
+            costs[m]["has_cost_data"] = True
+            costs[m]["total_estimated"] += estimated
+
+            groq_est = _safe_float_or_none(r.get("groq_estimated_cost")) or 0.0
+            jev_est = _safe_float_or_none(r.get("jev_estimated_cost")) or 0.0
+            costs[m]["groq_estimated"] += groq_est
+            costs[m]["jev_estimated"] += jev_est
+
+            # Actual expenditure: missing stays missing; only sum
+            # rows that actually carry a value.
+            groq_act = _safe_float_or_none(r.get("groq_actual_cost"))
+            jev_act = _safe_float_or_none(r.get("jev_actual_cost"))
+            total_act = _safe_float_or_none(r.get("total_actual_cost"))
+            if groq_act is not None:
+                costs[m]["groq_actual"] += groq_act
+            if jev_act is not None:
+                costs[m]["jev_actual"] += jev_act
+            if total_act is not None:
+                costs[m]["total_actual"] += total_act
+
+            version = r.get("pricing_version")
+            if version:
+                costs[m]["pricing_version"] = version
+
+    return costs
+
+
 def render_execution_monitor(execution_result):
     """Render the execution monitor with decision history and tool calls."""
     if not execution_result:
@@ -765,6 +832,7 @@ def render_benchmark_analytics():
     latencies = get_latency_data(filtered)
     token_data = get_token_data(filtered)
     escalations = get_escalation_data(filtered)
+    costs = get_cost_data(filtered)
 
     # Main content area
     # Metric cards across the top
@@ -903,6 +971,52 @@ def render_benchmark_analytics():
                           help="Of escalations, how many Groq recommendations were usable")
             else:
                 st.metric("Escalation Succeeded Rate", "N/A")
+
+    # Economic cost summary (Phase 11). Cost fields exist only in rows
+    # written by Phase 11+ code; historical rows carry no cost columns, so
+    # the section stays hidden rather than fabricating $0 figures.
+    cost_modes = [m for m in ["A", "B", "C"] if costs[m]["has_cost_data"]]
+    if cost_modes:
+        st.markdown("### Economic Cost Summary (estimated equivalent cost, USD)")
+
+        cost_rows = []
+        for mode_name in ["A", "B", "C"]:
+            c = costs[mode_name]
+            if not c["has_cost_data"]:
+                continue
+            groq_pct = (
+                c["groq_estimated"] / c["total_estimated"] * 100
+                if c["total_estimated"] else None
+            )
+            jev_pct = (
+                c["jev_estimated"] / c["total_estimated"] * 100
+                if c["total_estimated"] else None
+            )
+            cost_rows.append({
+                "mode": f"Mode {mode_name}",
+                "runs": c["runs"],
+                "groq_estimated": c["groq_estimated"],
+                "jev_estimated": c["jev_estimated"],
+                "total_estimated": c["total_estimated"],
+                "groq_actual": c["groq_actual"],
+                "jev_actual": c["jev_actual"],
+                "total_actual": c["total_actual"],
+                "groq_pct": groq_pct,
+                "jev_pct": jev_pct,
+                "pricing_version": c["pricing_version"] or "N/A"
+            })
+
+        if cost_rows:
+            cost_df = pd.DataFrame(cost_rows)
+            st.dataframe(cost_df, width="stretch", hide_index=True)
+
+            st.caption(
+                "Estimated equivalent cost applies reference paid pricing to "
+                "recorded tokens; it is not actual billing. Actual expenditure "
+                "is tracked separately (Groq free tier = $0; Jev actual must "
+                "come from its billing route). Historical rows predating cost "
+                "tracking show no cost figures."
+            )
 
     # Detailed per-task breakdown
     st.markdown("### Per-Task Breakdown")

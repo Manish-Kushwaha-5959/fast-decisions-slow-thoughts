@@ -90,7 +90,7 @@ NumPy · Plotly · pytest · python-dotenv · typesafe-sdk
 ├── data/                  knowledge base + 10-task benchmark dataset
 ├── experiments/           recorded results (append-only)
 ├── scripts/               run/benchmark/demo/smoke-test entry points
-├── tests/                 144 mocked tests
+├── tests/                 190 mocked tests
 ├── docs/                  ARCHITECTURE, EXPERIMENTS, DEVELOPMENT, REPRODUCIBILITY
 └── documentations/        historical phase notes (phases/ 01–06) + risk analysis
 ```
@@ -141,7 +141,7 @@ python scripts/demo_mode_c.py          # mocked, offline, free
 python -m pytest tests/ -v
 ```
 
-All 144 tests are mocked; no test contacts a live API.
+All 190 tests are mocked; no test contacts a live API.
 
 ## Evaluation and benchmarking
 
@@ -162,9 +162,20 @@ escalation counts/frequency, and the independently verified outcome
 self-reported success. Missing values stay `None`; nothing is invented.
 See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md).
 
+### Cost accounting (Phase 11)
+
+Every run also records estimated economic cost. Pricing is centralized
+in `config/pricing.py` (Groq GPT-OSS 120B: $0.15/$0.60 per 1M tokens;
+Jev 1.14.0: $0.042/$0.00 per 1M tokens) and is never hardcoded elsewhere.
+Each record separates **estimated equivalent cost** (reference pricing ×
+recorded tokens) from **actual expenditure** (amount charged, where
+known; Groq free tier = $0). Historical rows keep missing cost fields as
+missing; pricing changes create a new version rather than rewriting
+history. See [docs/EXPERIMENTS.md](docs/EXPERIMENTS.md#41-economic-cost-metrics-phase-11).
+
 ## Reproducibility
 
-`python -m pytest tests/ -v` → 144 passed (mocked). Mocked benchmark
+`python -m pytest tests/ -v` → 190 passed (mocked). Mocked benchmark
 runs are free and offline; live runs are opt-in with a hard budget.
 Recorded outputs live in `experiments/` (append-only). Full instructions:
 [docs/REPRODUCIBILITY.md](docs/REPRODUCIBILITY.md).

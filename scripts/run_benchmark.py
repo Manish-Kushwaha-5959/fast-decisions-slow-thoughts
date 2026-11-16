@@ -48,6 +48,11 @@ from evaluation.metrics import (
     extract_run_metrics,
     summarize_runs
 )  # noqa: E402
+from evaluation.economic_metrics import (
+    EconomicMetricsCalculator,
+    TaskEconomicMetrics
+)  # noqa: E402
+from config.pricing import get_pricing_config  # noqa: E402
 from evaluation.task_verifier import TaskVerifier, load_tasks  # noqa: E402
 from tools.registry import build_default_registry  # noqa: E402
 
@@ -334,6 +339,7 @@ class BenchmarkRunner:
         self.logger = logger or ExperimentLogger()
         self.execution_type = execution_type
         self.max_iterations = max_iterations
+        self.economic_calculator = EconomicMetricsCalculator()
 
     def execute_task(self, task, mode, repetition=1):
         """Run one task in one mode; return the raw execution record."""
@@ -391,6 +397,17 @@ class BenchmarkRunner:
         metrics = extract_run_metrics(execution)
 
         verification = self.verifier.verify(task, execution)
+
+        # Calculate economic metrics (Phase 11: cost accounting)
+        economic_metrics = self.economic_calculator.create_task_metrics_from_execution(
+            task_id=task["id"],
+            mode=mode,
+            execution_metrics=metrics,
+            execution_type=self.execution_type
+        )
+
+        # Merge economic metrics into the metrics dict for logging
+        metrics.update(economic_metrics.to_dict())
 
         self.logger.log(
             mode=mode,
@@ -471,6 +488,51 @@ def print_summary(summaries):
     print(
         "verified/failed/unverifiable are independent outcomes; agent ok "
         "is the agent's self-report. tokens are combined (Groq+Jev)."
+    )
+
+
+def print_economic_summary(economic_summaries):
+    """Print per-mode economic cost summary (Phase 11)."""
+
+    print("\n" + "=" * 72)
+    print("ECONOMIC COST SUMMARY (estimated equivalent cost, USD)")
+    print("=" * 72)
+
+    header = (
+        f"{'mode':<6}{'runs':>6}{'groq est.':>12}{'jev est.':>12}"
+        f"{'total est.':>12}{'avg/task':>12}{'groq %':>8}{'jev %':>8}"
+    )
+    print(header)
+    print("-" * len(header))
+
+    for mode in sorted(economic_summaries):
+        s = economic_summaries[mode]
+        groq_pct = (
+            f"{s.groq_cost_contribution * 100:>7.1f}"
+            if s.groq_cost_contribution is not None
+            else "     —"
+        )
+        jev_pct = (
+            f"{s.jev_cost_contribution * 100:>7.1f}"
+            if s.jev_cost_contribution is not None
+            else "     —"
+        )
+        print(
+            f"{s.mode:<6}{s.run_count:>6}"
+            f"{s.total_groq_estimated_cost:>12.6f}"
+            f"{s.total_jev_estimated_cost:>12.6f}"
+            f"{s.total_estimated_cost:>12.6f}"
+            f"{(s.avg_cost_per_task if s.avg_cost_per_task is not None else 0):>12.6f}"
+            f"{groq_pct}{jev_pct}"
+        )
+
+    print("-" * len(header))
+    print(
+        "Estimated equivalent cost applies reference paid pricing to recorded "
+        "tokens; it is not actual billing. Actual expenditure is tracked "
+        "separately (Groq free tier = $0; Jev actual must come from its "
+        "billing route). Pricing version: "
+        f"{get_pricing_config().groq_gpt_oss_120b.pricing_version}."
     )
 
 
@@ -701,7 +763,30 @@ def main():
         for mode in modes
     }
 
+    # Calculate economic summaries per mode
+    economic_calculator = EconomicMetricsCalculator()
+    economic_summaries = {}
+    for mode in modes:
+        economic_task_metrics = [
+            economic_calculator.create_task_metrics_from_execution(
+                task_id=run["task_id"],
+                mode=mode,
+                execution_metrics=run["metrics"],
+                execution_type=run.get("execution_type", "mocked")
+            )
+            for run in results[mode]
+        ]
+
+        economic_summaries[mode] = (
+            economic_calculator.aggregate_economic_metrics(
+                economic_task_metrics, mode
+            )
+        )
+
     print_summary(summaries)
+
+    # Print economic cost summary (Phase 11)
+    print_economic_summary(economic_summaries)
 
     if args.threshold_analysis and "C" in results:
         print_threshold_analysis(results["C"])

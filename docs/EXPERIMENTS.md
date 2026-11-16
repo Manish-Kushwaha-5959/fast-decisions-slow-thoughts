@@ -125,6 +125,58 @@ counts, both success rates, provider token totals, mean latency, mean
 iterations, tool-call counts and escalation counts. Missing values stay
 `None`.
 
+### 4.1 Economic cost metrics (Phase 11)
+
+Every run also records estimated economic cost. The fields are stored
+alongside the token metrics in `experiments/benchmark_results.{csv,jsonl}`
+and are computed by `evaluation/economic_metrics.py` from the
+provider-reported token usage already captured in the run record.
+
+| Field | Meaning |
+|---|---|
+| `groq_estimated_cost` | Estimated cost of Groq usage at reference paid pricing (USD). |
+| `jev_estimated_cost` | Estimated cost of Jev usage at reference paid pricing (USD). |
+| `total_estimated_cost` | Sum of the two estimated costs for the run. |
+| `groq_actual_cost` | Actual amount charged to the Groq account, when known. Free-tier calls are `$0`. |
+| `jev_actual_cost` | Actual amount charged for Jev usage, when known. Not assumed free merely because Groq is. |
+| `total_actual_cost` | Sum of the two actual costs. |
+| `usage_measurement_method` | `actual` (provider-reported usage), `estimated` (tokenizer proxy), or `mocked` (synthetic clients). |
+| `pricing_version` / `pricing_date` | Which pricing table produced the cost figures. |
+
+Aggregate metrics per mode (`EconomicMetricsSummary`): total estimated
+cost, average cost per task, median cost per task, cost by mode, Groq and
+Jev cost contribution shares, cost per successful task, and cost per
+failed task where meaningful.
+
+**Actual expenditure vs estimated equivalent cost.** These are separate
+fields and are never merged:
+
+- *Actual expenditure* is the amount charged to the account, where known.
+  Groq free-tier calls have actual expenditure of `$0`. Jev is not
+  assumed free merely because Groq is free; its actual cost must come
+  from the Jev billing route, not from token arithmetic.
+- *Estimated equivalent cost* applies the reference paid pricing below
+  to the recorded token consumption. It represents the estimated
+  economic cost of equivalent usage, not actual billing.
+
+**Pricing configuration** lives in `config/pricing.py` and is not
+hardcoded elsewhere. Reference defaults:
+
+| Model | Input (USD/1M tokens) | Output (USD/1M tokens) | Source |
+|---|---|---|---|
+| Groq GPT-OSS 120B | $0.15 | $0.60 | https://console.groq.com/docs/models |
+| Jev 1.14.0 | $0.042 | $0.00 | https://vercel.com/ai-gateway/models/jev-1.14.0 |
+
+**Historical compatibility.** Pre-existing benchmark rows carry no cost
+fields; they remain missing (`None` / empty), never invented. Pricing
+changes create a new `pricing_version` rather than rewriting history.
+
+**Mode-aware accounting.** Mode A includes only the services it actually
+invokes (Groq). Mode B accounts for its actual Jev and Groq usage. Mode C
+accounts for Jev usage plus Groq advisory escalation reviews. Tokens are
+never double-counted: each call's usage is accumulated once into the run
+record.
+
 ## 5. Data collection and logging
 
 `ExperimentLogger` appends every run to CSV (flat metrics) and JSONL
@@ -186,6 +238,17 @@ Recorded outputs currently in the repository:
 - **Loop-detection heuristic strictness:** termination requires
   `loop_probability >= 0.70` AND ≥ 2 tool calls AND normalised progress
   ≤ 0.20; the 0–5 progress scale is assumed, not verified.
+- **Actual expenditure not available in mocked runs:** `groq_actual_cost`
+  and `jev_actual_cost` are `$0` for mocked rows by construction. Live
+  runs record actual billing only where the provider exposes it; otherwise
+  the field stays missing rather than being estimated.
+- **Jev pricing route must be verified:** the Jev input price assumes the
+  Vercel AI Gateway `jev-1.14.0` route. Before relying on Jev cost
+  figures, confirm the configured `JEV_MODEL` and endpoint match that
+  pricing route; a different route may have different pricing.
+- **Escalation advisory cost is estimated:** Mode C advisory Groq reviews
+  are costed with a conservative token estimate unless the escalation
+  response carries provider-reported usage.
 
 ## 8. Research-scope note
 

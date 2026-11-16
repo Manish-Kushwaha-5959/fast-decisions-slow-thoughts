@@ -88,6 +88,39 @@ All files are append-only; do not hand-edit history.
   run the commands above to generate new data with a fresh `--output`
   directory.
 
+## 7. Cost accounting and pricing (Phase 11)
+
+New runs record estimated economic cost alongside token usage. The
+methodology and pricing configuration are documented in
+[EXPERIMENTS.md](EXPERIMENTS.md#41-economic-cost-metrics-phase-11).
+
+Key points for reproduction:
+
+- Pricing lives in `config/pricing.py` (reference defaults: Groq GPT-OSS
+  120B input $0.15/M, output $0.60/M; Jev 1.14.0 input $0.042/M, output
+  $0.00/M). Override via `GROQ_INPUT_PRICE_PER_MILLION`,
+  `GROQ_OUTPUT_PRICE_PER_MILLION`, `JEV_INPUT_PRICE_PER_MILLION`,
+  `JEV_OUTPUT_PRICE_PER_MILLION` environment variables if needed.
+- Each record carries `pricing_version` and `pricing_date`. Changing
+  pricing creates a new version; historical rows are never rewritten.
+- `groq_actual_cost` / `jev_actual_cost` are the amounts actually
+  charged, where known. Groq free-tier calls are `$0`. Jev is not
+  assumed free merely because Groq is; its actual cost must come from
+  the Jev billing route.
+- `groq_estimated_cost` / `jev_estimated_cost` apply reference paid
+  pricing to recorded tokens. They are estimates, not billing.
+- Historical rows (Phase 5–7) have no cost fields; they stay missing
+  (`None` / empty), never invented.
+
+To reproduce a cost-annotated mocked run:
+
+```bash
+python scripts/run_benchmark.py --mode all --repetitions 1
+```
+
+The CSV/JSONL output will include the cost columns listed in
+EXPERIMENTS.md §4.1.
+
 ## 7. Mocked vs live execution
 
 | | Mocked | Live |
