@@ -6,3 +6,9 @@ __pycache__/
 .DS_Store
 
 .claude/
+
+# Local artifacts
+*.bak
+export_*.py
+PROJECT_CONTEXT.txt
+SELECTED_CODE_CONTEXT.txt
