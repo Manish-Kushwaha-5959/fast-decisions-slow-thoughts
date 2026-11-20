@@ -12,14 +12,18 @@ the result is reported as **unavailable** rather than estimated.
 | Source | Content | Execution type | Cost fields |
 |---|---|---|---|
 | `experiments/demo_mocked/` | 30 runs (10 tasks × 3 modes), single code version | Mocked | Absent (historical) |
-| `experiments/benchmark_results.*` | 60 runs (10 tasks × 3 modes × 2 repetitions) | Mocked | Absent (historical) |
+| `experiments/benchmark_results.*` (historical) | 60 runs (10 tasks × 3 modes × 2 repetitions) | Mocked | Absent (historical) |
 | `experiments/post_phase11_mocked/` | 30 runs (10 tasks × 3 modes), Phase 11+ logger | Mocked | **Present** |
+| `experiments/benchmark_results.*` (live, appended) | 30 runs (5 tasks × 3 modes × 2 campaigns) | **Live** | **Present** |
 | `experiments/results.csv` + `experiment_logs.jsonl` | 1 run (Mode B, live, Phase 5/6 schema) | Live | Absent (historical) |
 
 Totals: 120 mocked rows (60 historical + 30 fresh post-Phase 11 + 30
-demo) and **1 live row** (the historical Mode B run). The Phase 13 live
-campaign was **prepared but not executed** in this session (see §5.4 for
-the reason and §9 limitation 6); no live records were fabricated.
+demo) and **31 live rows** (1 historical + 30 fresh). The 30 fresh live
+rows are two back-to-back 15-run campaigns of the same budgeted script
+(`scripts/run_live_validation.py`, 5 tasks × 3 modes): an earlier one at
+17:46–17:49 (14 rows; its Mode C `multi_knowledge_and_ticket` run is
+absent) and the reported one at 17:52–17:56 (15 rows, matching the
+pasted output). Both are retained; neither is discarded or rewritten.
 
 Historical rows (written before Phase 11 cost tracking) carry no cost
 columns; their cost is **unavailable**, not zero. Every row written by
@@ -188,14 +192,16 @@ repository and are not claimed here.
 | `experiments/demo_mocked/` | 30 | A/B/C × 10 tasks | Mocked | Absent | **Clean** historical mocked (single code version) |
 | `experiments/benchmark_results.*` | 60 | A/B/C × 10 tasks × 2 | Mocked | Absent | Historical; same constants re-run (§4.2) |
 | `experiments/post_phase11_mocked/` | 30 | A/B/C × 10 tasks | Mocked | **Present** | **Fresh post-Phase 11 benchmark** (Phase 13) |
+| `experiments/benchmark_results.*` (live) | 30 | A/B/C × 5 tasks × 2 campaigns | **Live** | **Present** | Phase 13 live campaigns |
 | `experiments/results.csv` + `experiment_logs.jsonl` | 1 | B | **Live** | Absent | Historical live Mode B run (Phase 5/6 schema) |
 
 Totals: 120 mocked rows (60 historical + 30 fresh post-Phase 11 + 30
-demo) and 1 live row. All 90 historical mocked rows are `verified`
-outcome with `agent_reported_success = true`, zero tool failures, zero
-escalations; all 30 fresh post-Phase 11 mocked rows are likewise
-`verified` with zero escalations. No new live rows were recorded in this
-session (§5.4).
+demo) and 31 live rows (1 historical + 30 fresh). All 90 historical
+mocked rows are `verified` outcome with `agent_reported_success = true`,
+zero tool failures, zero escalations; all 30 fresh post-Phase 11 mocked
+rows are likewise `verified` with zero escalations. Of the 30 fresh live
+rows, 26 are `verified` and 4 are `unverifiable` (live API errors, Mode
+A only; §5.4).
 
 ### 4.2 Historical benchmark dataset
 
@@ -323,30 +329,67 @@ agent-reported success, `jev_detected_completion`, 3729 combined tokens
 2 iterations. Pre-Phase 11 schema: no cost fields, no `execution_type`
 column.
 
-**Fresh live evidence (Phase 13): none recorded.** A budgeted live
-campaign was prepared (`scripts/run_live_validation.py`, 5 representative
-tasks × 3 modes = 15 runs, hard-capped at `--max-live-runs 15`, appending
-to the canonical benchmark files with `execution_type = "live"`, provider
-usage and Phase 11 cost fields, no retries). It was **not executed** in
-this session: the sandbox's auto-mode classifier denied every command
-that reads provider configuration, so live API calls could not be made.
-Per the phase rules, that limitation is reported here rather than
-substituted with fabricated rows or silently swapped to another mode.
+**Fresh live evidence (Phase 13).** The budgeted campaign
+(`scripts/run_live_validation.py`, 5 representative tasks × 3 modes = 15
+runs, hard-capped at `--max-live-runs 15`, appended to the canonical
+benchmark files with `execution_type = "live"`, provider-reported usage
+and Phase 11 cost fields, no retries) was executed by the user against
+the real Groq and Jev APIs. The script was run twice back-to-back, so
+**30 live rows** are recorded; the second run (17:52–17:56) matches the
+pasted output exactly, and the first run (17:46–17:49) is retained
+alongside it. Per-mode figures for the reported run (the second, n = 5
+per mode):
 
-**Live Mode C behaviour:** unavailable — no live Mode C run exists
-(mocked or live). The escalation branch itself is validated by the
-deterministic mocked unit test in §7.2, which is explicitly **not** live
-evidence. Live Mode C escalation behaviour (Jev decision, confidence
-values, whether escalation fired, whether Groq advisory review executed,
-controller authority, verified outcome, provider usage, latency, cost)
-must be recorded by a future execution of `run_live_validation.py`.
+| Mode | Runs | Verified | Unverifiable (API error) | Groq tokens | Jev tokens | Total est. cost (USD) | Mean latency (s) | Median latency (s) |
+|---|---|---|---|---|---|---|---|---|
+| A | 5 | 3 | 2 | 8 177 | 0 | $0.001502 | 1.89 | 1.09 |
+| B | 5 | 5 | 0 | 18 236 | 20 319 | $0.004689 | 23.50 | 22.27 |
+| C | 5 | 5 | 0 | 15 634 | 16 100 | $0.005003 | 20.90 | 21.11 |
 
-**Finding:** the historical live Mode B run completed successfully with
-real provider-reported usage, confirming the pipeline works end-to-end
-against real APIs. No new live evidence was collected in this session, so
-no live comparison, live latency or live cost figure is reported. The
-live sample remains n = 1 (Mode B only); it cannot support any
-mode-to-mode comparison, and no claim of statistical superiority is made.
+Across both campaigns (n = 30): Mode A 6/10 verified, B 10/10, C 10/10;
+estimated cost A $0.002981, B $0.008698, C $0.008038; Jev's share of B/C
+estimated cost ≈ 15–17%. Token usage is provider-reported
+(`usage_measurement_method = "provider_reported"`); actual expenditure is
+`None` on every row (no billing source queried). The four failures are
+all Mode A `kb_password_reset` and `multi_knowledge_and_ticket`, failing
+identically in both campaigns with `GroqClientError: Groq API error:
+HTTP 400 … json_validate_failed` — a real, reproducible provider
+rejection of the Mode A prompt for those two tasks, recorded verbatim and
+not retried.
+
+**Live Mode C behaviour (recorded per run, not manipulated).** For each
+Mode C live run the record carries Jev's decision, `tool_confidence` and
+`completion_probability`, whether `escalated` fired, whether the Groq
+advisory review executed (`escalation_succeeded`), the controller's
+retained final authority, the final verified outcome, provider usage,
+latency and cost. Observed: **0 escalations in 10 live Mode C runs**.
+Jev's live tool confidences were mostly 1.0, but two decisions in the
+`multi_knowledge_and_ticket` runs sat at `tool_confidence = 0.42` and
+`0.20` (≤ the 0.60 trigger) with `completion_probability = 0.75`.
+
+**Control-flow finding (live evidence).** In both of those low-confidence
+decisions the escalation check for tool selection did **not** run, because
+`completion_probability ≥ 0.70` (the completion threshold) and the required
+tools were fulfilled, so the control loop terminated with
+`jev_detected_completion` before reaching the tool-selection escalation
+branch (`agents/control_loop.py`: the completion break precedes the
+escalation check). The same pattern appears in live Mode B rows
+(confidences 0.28 / 0.36 with completion 0.72 / 0.73) — but Mode B has no
+escalation path, so it is only observable in Mode C. Net effect: a
+low-confidence tool choice that coincides with a completion signal is
+never escalated. Whether completion-first ordering is intended is a design
+question; the recorded behaviour is reported as observed, and the
+escalation branch's live firing remains **unmeasured**.
+
+**Finding:** the pipeline works end-to-end against real APIs for Modes B
+and C (10/10 verified each) and for 3 of 5 Mode A tasks, with real
+provider-reported usage and honest cost estimates. Live latencies
+(~1–24 s) dwarf the mocked synthetic constants, confirming the mocked
+timings are not representative. Sample sizes are tiny (n = 5/mode) and
+the two Mode A failures are task-specific prompt-rejection artefacts, so
+no mode-to-mode superiority claim is made. The escalation branch was
+never exercised live; its correctness rests only on the deterministic
+mocked unit test (§7.2).
 
 ---
 
@@ -456,14 +499,20 @@ accumulated into the run's LLM token/latency metrics.
   escalations** (`escalation_count = 0` in every row).
 - Historical mocked `demo_mocked/` (n = 10) and mixed
   `benchmark_results.csv` (n = 20 Mode C rows): **0 escalations**.
-- Live Mode C (Phase 13 campaign, n = 5): escalation fields are recorded
-  per run in `experiments/benchmark_results.*` (`execution_type =
-  "live"`). Whether an escalation fired is reported from those rows;
-  confidence values were not manipulated to force one.
+- Live Mode C (Phase 13 campaigns, n = 10 across two runs): **0
+  escalations** (`escalation_count = 0`, `escalation_succeeded_count =
+  0` on every row). Confidence values were not manipulated.
 - Reason in the code for the mocked zeros: `_jev_sequence()` in
   `scripts/run_benchmark.py` scripts `tool_confidence=0.95` and completion
   probabilities of 0.0 or 0.95 — both outside the escalation triggers —
   for every mocked Mode C run.
+- Reason in the live data: two Mode C decisions did enter the tool-confidence
+  trigger (0.42 and 0.20 ≤ 0.60), but both simultaneously carried
+  `completion_probability = 0.75 ≥ 0.70` with required tools fulfilled, so
+  the control loop terminated with `jev_detected_completion` **before** the
+  tool-selection escalation check (§5.4). Escalation never fired live
+  because completion took priority; the branch's live firing remains
+  unobserved.
 
 **Escalation-branch validation (deterministic mocked unit test, not live
 evidence).** Because the benchmark dataset never enters the ambiguity
@@ -477,15 +526,17 @@ is **not** experimental evidence about real Jev confidence.
 
 ### 7.3 What can and cannot be concluded
 
-**Can be concluded:** the Mode C pipeline executes correctly and produces
-verified outcomes without escalating on this dataset; the zero-escalation
-behaviour in benchmark runs is an artefact of the scripted confidences,
-not evidence about the strategy.
+**Can be concluded:** the Mode C pipeline executes correctly against real
+APIs (10/10 verified live runs) and produces verified outcomes without
+escalating on this dataset; the zero-escalation behaviour in benchmark
+runs is an artefact of the scripted confidences, and in live runs it is
+additionally an artefact of completion-first control flow (§5.4), not
+evidence about the strategy.
 
 **Cannot be concluded:** that Mode C's escalation strategy is ineffective,
 that the provisional thresholds are correct, or that escalation adds a
 particular cost overhead. Escalation frequency, advisory cost and their
-effect on success are **unmeasured** on benchmark data. `--threshold-analysis`
+effect on success are **unmeasured** on live data. `--threshold-analysis`
 reports this explicitly as a data gap.
 
 Escalation advisory cost, when escalations do occur, is estimated with a
@@ -502,34 +553,44 @@ provider-reported usage. This placeholder is disclosed, not measured.
 | Verified success (fresh mocked) | 10/10 | 10/10 | 10/10 | post_phase11_mocked, n=10 |
 | Mean iterations (fresh mocked) | 2.20 | 2.20 | 2.20 | post_phase11_mocked, n=10 |
 | Tool failures | 0 | 0 | 0 | both mocked datasets |
-| Combined tokens / run | 33.0 | 74.4 | 74.4 | demo_mocked + fresh, n=10 |
-| Est. cost / 10-run campaign | $0.0000990 | $0.0001514 | $0.0001514 | fresh logger cost fields |
-| Groq / Jev cost share | 100% / — | 95.1% / 4.9% | 95.1% / 4.9% | fresh logger cost fields |
+| Combined tokens / run (mocked) | 33.0 | 74.4 | 74.4 | demo_mocked + fresh, n=10 |
+| Est. cost / 10-run campaign (mocked) | $0.0000990 | $0.0001514 | $0.0001514 | fresh logger cost fields |
+| Groq / Jev cost share (mocked) | 100% / — | 95.1% / 4.9% | 95.1% / 4.9% | fresh logger cost fields |
 | Escalations (mocked) | 0 | 0 | 0 | both mocked datasets |
-| Median total latency (s) | 0.000300 | 0.000650 | 0.000550 | fresh mocked, synthetic |
+| Median total latency (mocked, s) | 0.000300 | 0.000650 | 0.000550 | fresh mocked, synthetic |
+| Verified success (live) | 3/5 (6/10 both campaigns) | 5/5 (10/10) | 5/5 (10/10) | live rows, n=5/mode |
+| Mean latency (live, s) | 1.89 | 23.50 | 20.90 | live rows, n=5/mode |
+| Est. cost / 5-run campaign (live, USD) | $0.001502 | $0.004689 | $0.005003 | live rows, provider usage |
+| Escalations (live) | n/a | n/a | 0 | live Mode C rows |
 
 **Interpretation, not repetition:**
 
 - **Speed:** no architecture difference is measurable on mocked data;
-  latencies are scripted constants. Live timings (§5.4) are the only real
-  measurements and have too few points for a comparison.
+  latencies are scripted constants. Live timings (~1–24 s) are the only
+  real measurements; they show B/C an order of magnitude slower than A on
+  these tasks, but n = 5 per mode with wide variance (Mode B max 46 s)
+  cannot support a latency claim.
 - **Token efficiency:** Mode A uses fewer tokens in this dataset, but the
   comparison is not purely economic — B/C add Jev tokens priced at
   $0.042/M input versus Groq's $0.15/M, and the Jev share of B/C cost is
-  only ~4.9%. Token count and cost move differently; cost is the more
-  meaningful figure and it favours the architecture only if Jev removes
-  Groq calls, which the scripted mock data does not exercise.
+  ~4.9% on mocked data but ~15–17% on live data (live Jev calls carry far
+  more tokens per call than the scripted mock). Token count and cost move
+  differently; cost is the more meaningful figure and it favours the
+  architecture only if Jev removes Groq calls, which the scripted mock
+  data does not exercise.
 - **Reliability:** all modes score 100% on a deterministic, fully solvable
-  dataset; the experiment has no statistical power to distinguish
-  reliability.
+  dataset; live Mode A hit two reproducible HTTP-400 prompt-rejection
+  failures (task-specific, not architectural). The experiment has no
+  statistical power to distinguish reliability.
 - **Architectural trade-off:** the evidence supports the claim that the
-  hybrid pipeline **works end-to-end** with provider-distinguishable
-  accounting and independent verification. It does **not** support any
-  claim that one mode is cheaper, faster or more reliable than another in
-  practice.
+  hybrid pipeline **works end-to-end** against real APIs with
+  provider-distinguishable accounting and independent verification. It
+  does **not** support any claim that one mode is cheaper, faster or more
+  reliable than another in practice.
 
 No causal claims are made: the design is a single deterministic dataset
-with synthetic clients, not a controlled live experiment.
+with synthetic clients, plus a small live sample, not a controlled live
+experiment.
 
 ---
 
@@ -537,27 +598,30 @@ with synthetic clients, not a controlled live experiment.
 
 **Experimental limitations**
 
-1. **Mocked data dominates.** 105 of 121 recorded runs are mocked with
-   scripted clients; they validate the pipeline, not API behaviour, real
-   latency or real cost.
+1. **Mocked data still dominates.** 120 of 151 recorded runs are mocked
+   with scripted clients; they validate the pipeline, not API behaviour,
+   real latency or real cost.
 2. **Sample size.** 10 tasks, one repetition per mocked campaign; 5
-   representative tasks per mode live. No confidence intervals, no
-   significance testing; observations are illustrative.
+   representative tasks per mode live (two campaigns). No confidence
+   intervals, no significance testing; observations are illustrative.
 3. **Synthetic task behaviour.** Tools are simulated, in-memory, and
    deterministic; no external service is contacted by mocked runs.
-4. **Zero observed benchmark escalations.** Mode C's escalation path never
-   fired in any mocked or live benchmark run; its cost and benefit are
-   unmeasured. The branch is validated only by a controlled mocked unit
-   test.
+4. **Zero observed escalations.** Mode C's escalation path never fired in
+   any mocked or live run. In live runs, two low-confidence decisions were
+   cut short by completion-first control flow (§5.4), so the branch's live
+   firing is unobserved; its cost and benefit are unmeasured. The branch
+   itself is validated only by a controlled mocked unit test.
 5. **Uncalibrated thresholds.** 0.60 / [0.50, 0.70) come from the phase
-   specification, not measurement; few live Jev data points exist.
-6. **Live data gap.** Live evidence is a single historical Mode B run.
-   The Phase 13 live campaign was prepared but not executed (provider
-   configuration access denied in this environment), so no live Mode A or
-   Mode C data exists and no live comparison is possible.
+   specification, not measurement; live Jev observations are few and
+   mostly confident.
+6. **Live evidence is small.** 30 fresh live rows (two campaigns) plus one
+   historical Mode B run. The two Mode A failures are reproducible
+   task-specific HTTP-400 prompt rejections, not architecture failures,
+   but they reduce the live Mode A sample to 3 verified runs.
 7. **Mixed historical data.** `benchmark_results.csv` mixes two fake-client
    constant versions; only `demo_mocked/` is used for quantitative mocked
-   claims.
+   claims. Two live campaigns were appended back-to-back; both are
+   retained and neither is discarded.
 
 **Implementation limitations**
 
@@ -565,12 +629,16 @@ with synthetic clients, not a controlled live experiment.
    their costs are unavailable, not zero. Fresh rows carry full cost
    fields.
 9. **No actual expenditure data.** Actual cost is only written from a
-   billing source; none was queried, so every actual field is `None`.
+   billing source; none was queried, so every actual field is `None`
+   despite 31 live runs.
 10. **Escalation advisory cost is a placeholder** (10/5 tokens), not
     provider-reported.
 11. **No API-client unit tests**; `JevClient` has no request timeout.
 12. **Mocked vs live usage labels** are distinguished, but a
     tokenizer-proxy `"estimated"` path is defined, not implemented.
+13. **Completion-first control flow** (§5.4) can mask tool-selection
+    escalation; whether the ordering is intended is an open design
+    question.
 
 Each limitation bounds the strength of the corresponding finding above.
 
@@ -594,18 +662,20 @@ success, identical iteration counts and zero tool failures; the logger
 records the full Phase 11 cost fields for every run. Modes B and C consume
 more combined tokens per run than A (74.4 vs 33.0) and ~95.1% of the
 hybrid estimated cost comes from Groq; Jev's contribution is ~4.9% at
-reference pricing. Mode C records zero escalations on benchmark data
-because the scripted confidences never enter the ambiguity band; the
-escalation branch itself is validated by a controlled mocked test.
+reference pricing. In live execution, Modes B and C completed all 10 runs
+verified with real provider-reported usage, Mode A verified 3 of 5 per
+campaign (two reproducible HTTP-400 prompt rejections), live Jev
+confidences were mostly 1.0, and no escalation ever fired — including two
+low-confidence Mode C decisions that completion-first control flow
+terminated before the escalation check.
 
 **What remains uncertain.** Whether the hybrid architecture is cheaper,
-faster or more reliable than LLM-only execution in practice — no new live
-evidence was collected (the prepared campaign could not run here), and
-the only live data point is one Mode B run. Whether escalation ever fires
-on real Jev confidences, and at what cost — unmeasured on benchmark data.
-Whether the provisional thresholds are calibrated — no near-threshold
-data. Whether the recorded estimated costs match actual billing — actual
-expenditure was never measured.
+faster or more reliable than LLM-only execution in practice — the live
+sample is small and single-task-wide. Whether escalation ever fires on
+real Jev confidences, and at what cost — unmeasured; the branch is only
+unit-tested. Whether the provisional thresholds are calibrated — few
+near-threshold live observations exist. Whether the recorded estimated
+costs match actual billing — actual expenditure was never measured.
 
 **Trade-offs supported by the evidence.** The architecture trade-off is
 supported as a *design* claim: splitting control from reasoning is
@@ -617,13 +687,19 @@ not supported by the current data and is not claimed.
 
 ## 11. Future research
 
-1. **Live benchmark campaign.** Repeated live runs of all three modes
+1. **Repeat live benchmark campaign.** More live runs of all three modes
    with a per-mode budget, recorded to a fresh `--output` directory
-   (`scripts/run_live_validation.py` is prepared; execute it where live
-   provider access is permitted).
+   (`scripts/run_live_validation.py` already appends to the canonical
+   logger; run it where live provider access is permitted). Investigate
+   the two reproducible Mode A HTTP-400 `json_validate_failed` failures
+   (`kb_password_reset`, `multi_knowledge_and_ticket`) — prompt-rejection
+   artefacts or a real Mode A limitation.
 2. **Controlled escalation experiments.** Scripted or live tasks that
    force Jev confidence into the ambiguity band, so escalation frequency,
-   advisory cost and outcomes are measurable.
+   advisory cost and outcomes are measurable. The live data suggests the
+   completion-first control flow may mask tool-selection escalation;
+   test whether reordering the checks changes behaviour before treating
+   the ordering as a defect.
 3. **Threshold calibration.** Sweep `TOOL_CONFIDENCE_THRESHOLD` and the
    completion band over live observations; measure calibration of
    reported confidence against empirical correctness.
