@@ -75,6 +75,11 @@ def main():
         help="Confirm the live-run cost warning without prompting."
     )
     parser.add_argument(
+        "--escalate-before-completion", action="store_true",
+        help="Enable Mode C tool-selection escalation before the "
+             "completion break (opt-in; default off)."
+    )
+    parser.add_argument(
         "--quiet", action="store_true",
         help="Suppress per-run progress lines."
     )
@@ -127,11 +132,17 @@ def main():
     results = {mode: [] for mode in modes}
 
     for mode in modes:
+        # Determine if Mode C should have escalate_before_completion enabled
+        if mode == "C" and args.escalate_before_completion:
+            mode_escalate_before_completion = True
+        else:
+            mode_escalate_before_completion = False
+
         for task in tasks:
             run_id = f"{mode}-{task['id']}-01-live-{uuid.uuid4().hex[:6]}"
             error = None
             try:
-                execution = _run_live(task, mode, args.max_iterations)
+                execution = _run_live(task, mode, args.max_iterations, mode_escalate_before_completion)
                 execution = execution.to_dict()
             except Exception as exc:  # noqa: BLE001 — record, never retry
                 execution = {

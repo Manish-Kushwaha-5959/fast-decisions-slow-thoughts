@@ -108,7 +108,8 @@ class HybridAgent:
         enable_escalation: bool = True,
         tool_confidence_threshold: Optional[float] = None,
         completion_ambiguity_lower: Optional[float] = None,
-        completion_ambiguity_upper: Optional[float] = None
+        completion_ambiguity_upper: Optional[float] = None,
+        escalate_before_completion: bool = False
     ):
         self.llm = llm_client or GroqLLMClient()
         self.jev = jev_client or JevClient()
@@ -143,7 +144,8 @@ class HybridAgent:
             jev_client=self.jev,
             registry=self.registry,
             max_iterations=max_iterations,
-            escalation_agent=self.escalation_agent
+            escalation_agent=self.escalation_agent,
+            escalate_before_completion=escalate_before_completion
         )
 
     @staticmethod

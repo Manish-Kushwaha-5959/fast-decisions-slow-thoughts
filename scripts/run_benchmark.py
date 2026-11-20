@@ -292,7 +292,7 @@ def _run_modes_bc_mocked(task, enable_escalation):
         agent.close()
 
 
-def _run_live(task, mode, max_iterations):
+def _run_live(task, mode, max_iterations, escalate_before_completion=False):
     """Execute one task against the real APIs (opt-in only)."""
 
     from models.llm_client import GroqLLMClient  # local import: live-only
@@ -311,7 +311,8 @@ def _run_live(task, mode, max_iterations):
             jev_client=JevClient(),
             registry=build_default_registry(),
             max_iterations=max_iterations,
-            enable_escalation=(mode == "C")
+            enable_escalation=(mode == "C"),
+            escalate_before_completion=escalate_before_completion
         )
 
     try:

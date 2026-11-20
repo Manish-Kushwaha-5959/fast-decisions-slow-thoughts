@@ -60,7 +60,8 @@ class ControlLoop:
         completion_threshold: float = 0.70,
         loop_threshold: float = 0.70,
         max_identical_calls: int = 2,
-        escalation_agent: Optional["EscalationAgent"] = None
+        escalation_agent: Optional["EscalationAgent"] = None,
+        escalate_before_completion: bool = False
     ):
         if max_iterations < 1:
             raise ValueError("max_iterations must be at least 1.")
@@ -78,6 +79,10 @@ class ControlLoop:
         # Mode C: when present, uncertain Jev decisions are escalated
         # to Groq. When None the loop behaves exactly like Mode B.
         self.escalation_agent = escalation_agent
+        # When True, evaluate tool-selection uncertainty before the
+        # completion break. When False (default), existing completion-first
+        # ordering is preserved.
+        self.escalate_before_completion = escalate_before_completion
 
     @staticmethod
     def _parse_json(content: str) -> dict:
@@ -354,8 +359,72 @@ class ControlLoop:
                 "escalation_reason": None,
                 "groq_recommendation": None,
                 "final_decision": None,
-                "escalation_succeeded": None
+                "escalation_succeeded": None,
+                # For tool-selection escalations: whether the advised
+                # selection was actually executed. Stays None when no
+                # tool-selection escalation happened; False means the
+                # advisory review ran but the loop terminated before the
+                # recommended tool was executed (advisory-and-unused).
+                "escalated_tool_executed": None
             })
+
+            # The tool Jev selected, possibly replaced by an advisory
+            # review below. Initialised once per iteration so the later
+            # escalation block does not re-select from Jev's raw pick.
+            selected_tool = decision.selected_tool
+            escalated_this_iteration = False
+
+            # When escalate_before_completion is enabled and an
+            # escalation agent is available, evaluate tool-selection
+            # uncertainty before the completion break. This makes the
+            # advisory Groq review reachable even when a completion
+            # signal is simultaneously present.
+            if (
+                self.escalate_before_completion
+                and self.escalation_agent is not None
+            ):
+                should_escalate_tool, _ = (
+                    self.escalation_agent.tool_selection_required(decision)
+                )
+
+                if should_escalate_tool:
+                    outcome = (
+                        self.escalation_agent.escalate_tool_selection(
+                            task=task,
+                            plan=plan,
+                            task_specification=(
+                                task_specification or {}
+                            ),
+                            decision=decision,
+                            available_tools=available_tools,
+                            tool_history=state["tool_history"]
+                        )
+                    )
+
+                    self._record_escalation_usage(result, outcome)
+
+                    # Record the escalation in decision history.
+                    # outcome.final_decision is guaranteed to be an
+                    # authorised tool by EscalationAgent.
+                    selected_tool = outcome.final_decision
+                    escalated_this_iteration = True
+
+                    result.decision_history[-1].update({
+                        "decision_type": "tool_selection",
+                        "escalated": True,
+                        "escalation_reason": outcome.reason,
+                        "groq_recommendation": (
+                            outcome.recommendation or None
+                        ),
+                        "final_decision": outcome.final_decision,
+                        "escalation_succeeded": outcome.succeeded,
+                        # Provisional: advisory review ran but has not
+                        # (yet) led to a tool execution. Flipped to True
+                        # only when a tool actually executes this
+                        # iteration; left False if the loop terminates
+                        # first (completion, loop, iteration limit).
+                        "escalated_tool_executed": False
+                    })
 
             state["progress_history"].append({
                 "iteration": iteration + 1,
@@ -491,8 +560,6 @@ class ControlLoop:
                 )
                 break
 
-            selected_tool = decision.selected_tool
-
             if selected_tool not in available_tools:
                 result.termination_reason = (
                     "unauthorized_jev_tool_selection"
@@ -507,8 +574,9 @@ class ControlLoop:
             # Mode C: uncertain tool selection. Jev's pick is already
             # authorised; if Groq's review recommends an authorised
             # tool it replaces the pick, otherwise execution falls back
-            # to Jev's authorised selection.
-            if self.escalation_agent is not None:
+            # to Jev's authorised selection. Skip if we already did
+            # a pre-completion escalation this iteration.
+            if self.escalation_agent is not None and not escalated_this_iteration:
                 should_escalate, _ = (
                     self.escalation_agent.tool_selection_required(
                         decision
@@ -543,7 +611,10 @@ class ControlLoop:
                             outcome.recommendation or None
                         ),
                         "final_decision": outcome.final_decision,
-                        "escalation_succeeded": outcome.succeeded
+                        "escalation_succeeded": outcome.succeeded,
+                        # Advisory review ran earlier; advisory-and-used
+                        # flag handled at tool execution point.
+                        "escalated_tool_executed": False
                     })
 
             tool_definition = self.registry.get_tool(selected_tool)
@@ -652,6 +723,15 @@ class ControlLoop:
                 "execution_status": execution_status,
                 "result": tool_result
             }
+
+            # If a tool-selection escalation happened this iteration,
+            # mark the advisory recommendation as executed (advisory-and-used).
+            if (
+                result.decision_history
+                and result.decision_history[-1].get("decision_type") == "tool_selection"
+                and result.decision_history[-1].get("escalated") is True
+            ):
+                result.decision_history[-1]["escalated_tool_executed"] = True
 
         else:
             result.termination_reason = "maximum_iterations_reached"

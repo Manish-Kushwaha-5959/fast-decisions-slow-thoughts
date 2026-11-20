@@ -185,7 +185,8 @@ def make_agent(
     enable_escalation=True,
     tool_confidence_threshold=None,
     completion_ambiguity_lower=None,
-    completion_ambiguity_upper=None
+    completion_ambiguity_upper=None,
+    escalate_before_completion=False
 ):
     llm = FakeLLMClient(llm_responses)
     jev = FakeJevClient(
@@ -208,6 +209,7 @@ def make_agent(
         registry=registry,
         max_iterations=max_iterations,
         enable_escalation=enable_escalation,
+        escalate_before_completion=escalate_before_completion,
         **kwargs
     )
 
@@ -871,3 +873,213 @@ def test_escalation_outcome_records_usage():
 
     assert outcome.decision_type == "tool_selection"
     assert outcome.total_tokens == 15
+
+
+# ---------------------------------------------------------
+# Observable Mode C escalation (escalate_before_completion)
+# ---------------------------------------------------------
+
+def test_escalate_before_completion_triggers_on_low_confidence_with_completion():
+    """With the opt-in flag, low confidence + completion signal escalates."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(),
+            escalation_tool_response("check_service_status"),
+            final_response()
+        ],
+        jev_decisions=[
+            # Low tool confidence with high completion probability and
+            # fulfilled required tool (check_service_status ran earlier).
+            make_jev_decision(
+                selected_tool="check_service_status",
+                tool_confidence=0.30,
+                tool_probabilities={"check_service_status": 0.30},
+                completion_probability=0.95,
+                progress_score=5.0
+            ),
+            make_jev_decision(
+                selected_tool="check_service_status",
+                tool_confidence=0.95,
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ],
+        escalate_before_completion=True,
+        enable_escalation=True
+    )
+
+    result = agent.run("Check the current VPN service status.")
+
+    # The escalation must fire before the completion break.
+    records = find_escalation_records(result)
+    assert len(records) == 1
+    assert records[0]["decision_type"] == "tool_selection"
+    assert records[0]["escalated"] is True
+    assert records[0]["escalation_succeeded"] is True
+
+    # Groq was consulted for the advisory review.
+    assert len(llm.calls) == 3
+
+    # The task still completed successfully via the normal path.
+    assert result.success is True
+
+
+def test_escalate_before_completion_respects_evidence_gate():
+    """Escalation must not allow task completion without evidence."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(
+                allowed_tools=[
+                    "check_service_status",
+                    "search_knowledge_base"
+                ],
+                required_tools=["check_service_status"]
+            ),
+            escalation_tool_response("check_service_status"),
+            arguments_response("wifi"),
+            final_response()
+        ],
+        jev_decisions=[
+            # Low confidence, high completion, but mandatory tool NOT
+            # yet executed (search_knowledge_base was chosen instead).
+            make_jev_decision(
+                selected_tool="search_knowledge_base",
+                tool_confidence=0.20,
+                tool_probabilities={"search_knowledge_base": 0.20},
+                completion_probability=0.95,
+                progress_score=5.0
+            ),
+            make_jev_decision(
+                selected_tool="search_knowledge_base",
+                tool_confidence=0.95,
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ],
+        escalate_before_completion=True,
+        enable_escalation=True
+    )
+
+    result = agent.run("Check the current VPN service status.")
+
+    # Even after escalation, the evidence gate must hold: no completion.
+    assert result.success is False
+    assert result.termination_reason == "required_tools_not_fulfilled"
+    # The escalation was recorded but did not complete the task.
+    records = find_escalation_records(result)
+    assert len(records) == 1
+    assert records[0]["decision_type"] == "tool_selection"
+    assert records[0]["escalated"] is True
+
+
+def test_escalate_before_completion_unauthorised_recommendation_rejected():
+    """An unauthorised Groq recommendation must not become the tool."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(allowed_tools=["check_service_status"]),
+            escalation_tool_response("delete_database"),
+            arguments_response("VPN"),
+            final_response()
+        ],
+        jev_decisions=[
+            # Low confidence on first iteration triggers escalation;
+            # completion is low so the tool still executes.
+            make_jev_decision(
+                tool_confidence=0.30,
+                tool_probabilities={"check_service_status": 0.30},
+                completion_probability=0.0,
+                progress_score=5.0
+            ),
+            make_jev_decision(
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ],
+        escalate_before_completion=True,
+        enable_escalation=True
+    )
+
+    result = agent.run("Check the current VPN service status.")
+
+    # The unauthorised recommendation was rejected; Jev's authorised
+    # pick executed instead. Nothing unsafe ran.
+    assert result.tool_calls[0]["tool_name"] == "check_service_status"
+    assert result.tool_calls[0]["execution_status"] == "success"
+
+    record = find_escalation_records(result)[0]
+    assert record["escalation_succeeded"] is False
+    assert "invalid tool" in record["escalation_reason"]
+    assert record["final_decision"] == "check_service_status"
+
+
+def test_escalate_before_completion_default_off():
+    """Default behaviour must remain unchanged (completion-first)."""
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            plan_response(),
+            final_response()
+        ],
+        jev_decisions=[
+            make_jev_decision(
+                tool_confidence=0.30,
+                tool_probabilities={"check_service_status": 0.30},
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ],
+        enable_escalation=True,
+        escalate_before_completion=False
+    )
+
+    result = agent.run("Check the current VPN service status.")
+
+    # No escalation should occur by default.
+    assert find_escalation_records(result) == []
+    # Groq was not consulted for an escalation review.
+    assert len(llm.calls) == 2
+    # The run completed via the normal completion path.
+    assert result.success is True
+    assert result.termination_reason == "jev_detected_completion"
+
+
+def test_escalate_before_completion_advisory_but_unused():
+    """
+    If completion fires immediately after an advisory escalation,
+    the record must not imply the recommended tool was executed.
+    """
+    agent, llm, jev = make_agent(
+        llm_responses=[
+            # planning, escalation review, final response (no tool
+            # execution needed because completion succeeded).
+            plan_response(),
+            escalation_tool_response("check_service_status"),
+            final_response()
+        ],
+        jev_decisions=[
+            # Low confidence + high completion + fulfilled evidence:
+            # escalation fires, then completion break fires before any
+            # tool execution.
+            make_jev_decision(
+                selected_tool="check_service_status",
+                tool_confidence=0.30,
+                tool_probabilities={"check_service_status": 0.30},
+                completion_probability=0.95,
+                progress_score=5.0
+            )
+        ],
+        escalate_before_completion=True,
+        enable_escalation=True
+    )
+
+    result = agent.run("Check the current VPN service status.")
+
+    records = find_escalation_records(result)
+    assert len(records) == 1
+    assert records[0]["decision_type"] == "tool_selection"
+    assert records[0]["escalated"] is True
+    assert records[0]["final_decision"] is not None
+
+    # Completion fired; no tool was executed after the escalation.
+    assert result.success is True
+    assert result.termination_reason == "jev_detected_completion"
+    assert result.tool_calls == []
