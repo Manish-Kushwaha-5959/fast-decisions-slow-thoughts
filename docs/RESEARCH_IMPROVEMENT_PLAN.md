@@ -1,12 +1,13 @@
 # Research Improvement Plan — Fast Decisions, Slow Thoughts
 
-**Status:** Session 1 implementation complete (2026-11-20). The opt-in
+**Status:** Session 2 audit complete (2026-11-21). The opt-in
 control-flow ordering (`escalate_before_completion`, default `False`) has
 been added to `ControlLoop` and threaded through `HybridAgent`; the CLI flag
 `--escalate-before-completion` has been added to
 `scripts/run_live_validation.py`; new unit tests cover the required edge
-cases; full mocked suite is green (206 passed). The live campaign
-(Sessions 2–3) is still pending.
+cases; full mocked suite is green (206 passed). Session 2 audit verified
+the implementation is correct and ready for the controlled live
+experiment (Session 3). The live campaign (Session 3) is the next step.
 
 **Purpose:** Give a future session enough verified detail to implement the
 selected task without repeating this investigation.
